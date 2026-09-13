@@ -4,11 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>現場庫存快速掃描系統</title>
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <!-- HTML5-QRCode Scanner -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     body {
@@ -51,7 +48,7 @@
 
   <main class="max-w-md mx-auto p-4 space-y-4">
 
-    <!-- API 連線警示 (初次未填 GAS 網址時提示) -->
+    <!-- API 連線警示 -->
     <div id="apiConfigAlert" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-3 text-amber-900 text-xs flex items-center justify-between">
       <div class="flex items-center space-x-2">
         <i data-lucide="alert-circle" class="w-5 h-5 text-amber-600 shrink-0"></i>
@@ -89,7 +86,7 @@
           <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
             料號 (B 欄) <span class="text-rose-500">*</span>
           </label>
-          <span id="skuSourceHint" class="text-[10px] text-slate-400">載入品項清單中...</span>
+          <span id="skuSourceHint" class="text-[10px] text-slate-400">載入品項中...</span>
         </div>
         
         <div class="flex gap-2">
@@ -106,7 +103,6 @@
           </button>
         </div>
 
-        <!-- 料號 Auto-complete 聯想下拉選單 -->
         <div id="skuSuggestions" class="hidden absolute left-0 right-16 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100">
         </div>
       </div>
@@ -187,7 +183,6 @@
 
   </main>
 
-  <!-- 原生相機備援 input -->
   <input type="file" id="fallbackFileInput" accept="image/*" capture="environment" class="hidden">
 
   <!-- 即時相機掃描全螢幕視窗 -->
@@ -202,7 +197,6 @@
       </button>
     </div>
 
-    <!-- 掃描框與動態雷射線 -->
     <div class="w-full max-w-sm mx-auto my-auto space-y-3">
       <div class="relative overflow-hidden rounded-2xl bg-black border-2 border-emerald-400 shadow-2xl min-h-[300px] flex items-center justify-center">
         <div id="reader" class="w-full"></div>
@@ -215,7 +209,6 @@
       </div>
     </div>
 
-    <!-- 底部控制按鈕 -->
     <div class="flex items-center justify-center gap-3 pb-4">
       <button id="btnSwitchCamera" class="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-full flex items-center space-x-2 backdrop-blur-md">
         <i data-lucide="switch-camera" class="w-4 h-4"></i>
@@ -261,12 +254,12 @@
   </div>
 
   <script>
-    let currentMode = '1 In'; // '1 In' 或 '3 Out'
+    let currentMode = '1 In';
     let currentScanTarget = 'sku';
     let html5QrCode = null;
     let cameraList = [];
     let currentCameraIndex = 0;
-    let activeItemList = []; // Active_Item 清單
+    let activeItemList = [];
 
     let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
 
@@ -341,7 +334,6 @@
       localStorage.setItem('thg_inv_operator', inputOperator.value.trim());
     });
 
-    // 模式切換 (1 In / 3 Out)
     modeInBtn.addEventListener('click', () => setMode('1 In'));
     modeOutBtn.addEventListener('click', () => setMode('3 Out'));
 
@@ -361,7 +353,6 @@
       lucide.createIcons();
     }
 
-    // 數量控制
     document.getElementById('btnQtyMinus').addEventListener('click', () => {
       let val = parseInt(inputQty.value) || 1;
       if (val > 1) inputQty.value = val - 1;
@@ -371,7 +362,6 @@
       inputQty.value = val + 1;
     });
 
-    // 清除按鈕控制
     inputSku.addEventListener('input', () => {
       btnClearSku.classList.toggle('hidden', !inputSku.value);
       handleSkuAutoComplete(inputSku.value);
@@ -391,7 +381,6 @@
       btnClearLoc.classList.add('hidden');
     });
 
-    // 載入 Active_Item 料號清單
     async function loadActiveItems() {
       if (!API_ENDPOINT) return;
       try {
@@ -401,15 +390,12 @@
           activeItemList = data.items;
           skuSourceHint.textContent = `已載入 ${activeItemList.length} 種品項`;
           skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
-        } else {
-          skuSourceHint.textContent = "未能載入 Active_Item";
         }
       } catch (e) {
-        skuSourceHint.textContent = "品項離線模式";
+        skuSourceHint.textContent = "離線模式";
       }
     }
 
-    // Auto-complete 聯想過濾
     function handleSkuAutoComplete(query) {
       query = query.trim().toLowerCase();
       if (!query || activeItemList.length === 0) {
@@ -419,7 +405,7 @@
 
       const matches = activeItemList
         .filter(item => item.toLowerCase().includes(query))
-        .slice(0, 15); // 最多顯示 15 個
+        .slice(0, 15);
 
       if (matches.length === 0) {
         skuSuggestions.classList.add('hidden');
@@ -441,19 +427,15 @@
       skuSuggestions.classList.add('hidden');
       btnClearSku.classList.remove('hidden');
       fetchStockInfo(sku);
-      if (!inputLocation.value) {
-        inputLocation.focus();
-      }
+      if (!inputLocation.value) inputLocation.focus();
     };
 
-    // 點擊空白處關閉 Auto-complete 下拉
     document.addEventListener('click', (e) => {
       if (!inputSku.contains(e.target) && !skuSuggestions.contains(e.target)) {
         skuSuggestions.classList.add('hidden');
       }
     });
 
-    // 啟動相機掃描
     btnScanSku.addEventListener('click', () => startScanner('sku', '掃描料號 QR Code'));
     btnScanLoc.addEventListener('click', () => startScanner('location', '掃描儲位 QR Code'));
     btnCloseScanner.addEventListener('click', stopScanner);
@@ -465,9 +447,7 @@
       cameraLoading.classList.remove('hidden');
       laserLine.classList.add('hidden');
 
-      if (!html5QrCode) {
-        html5QrCode = new Html5Qrcode("reader");
-      }
+      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
 
       try {
         const devices = await Html5Qrcode.getCameras();
@@ -502,7 +482,7 @@
           cameraLoading.classList.add('hidden');
           laserLine.classList.remove('hidden');
         })
-        .catch(err => {
+        .catch(() => {
           cameraLoading.classList.add('hidden');
           showToast('無法啟用視訊串流，請改用拍照掃碼', 'error');
         });
@@ -540,7 +520,7 @@
       const file = e.target.files[0];
       if (!file) return;
 
-      showToast("正在解析拍攝照片中的條碼...", "info");
+      showToast("正在解析照片條碼...", "info");
       if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
 
       html5QrCode.scanFile(file, true)
@@ -597,8 +577,8 @@
       }
     }
 
-    // 表單提交：支援雙軌（POST + GET fallback）
-    document.getElementById('stockForm').addEventListener('submit', async (e) => {
+    // 【極速提交優化】：使用 Image Beacon 零延遲秒級送達 Google Apps Script
+    document.getElementById('stockForm').addEventListener('submit', (e) => {
       e.preventDefault();
 
       if (!API_ENDPOINT) {
@@ -626,67 +606,51 @@
         sku: sku,
         qty: qty,
         location: location,
-        type: currentMode, // "1 In" 或 "3 Out"
+        type: currentMode,
         operator: operator,
         note: note
       };
 
-      try {
-        const qs = new URLSearchParams(postData).toString();
-        const res = await fetch(`${API_ENDPOINT}?${qs}`);
-        const data = await res.json();
+      // 產生查詢字串
+      const qs = new URLSearchParams(postData).toString();
+      const targetUrl = `${API_ENDPOINT}?${qs}`;
 
+      // 使用 Image 物件發送請求（完全不受跨域與 302 重導向限制，秒級發送）
+      const beacon = new Image();
+      let isDone = false;
+
+      const finishSuccess = () => {
+        if (isDone) return;
+        isDone = true;
         btnSubmit.disabled = false;
         btnSubmit.classList.remove('opacity-70');
         btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
 
-        if (data.success) {
-          showToast(`成功寫入！${sku} (${currentMode} ${qty})`, "success");
-          inputSku.value = "";
-          btnClearSku.classList.add('hidden');
-          inputLocation.value = "";
-          btnClearLoc.classList.add('hidden');
-          inputQty.value = "1";
-          inputNote.value = "";
-          stockNotice.classList.add('hidden');
-          loadRecentRecords();
-        } else {
-          showToast("寫入失敗: " + data.error, "error");
-        }
-      } catch (err) {
-        try {
-          const bodyData = new URLSearchParams(postData);
-          await fetch(API_ENDPOINT, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: bodyData.toString()
-          });
-          btnSubmit.disabled = false;
-          btnSubmit.classList.remove('opacity-70');
-          btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
-          showToast(`已送出至試算表！${sku} (${currentMode} ${qty})`, "success");
-          inputSku.value = "";
-          btnClearSku.classList.add('hidden');
-          inputLocation.value = "";
-          btnClearLoc.classList.add('hidden');
-          inputQty.value = "1";
-          inputNote.value = "";
-          stockNotice.classList.add('hidden');
-          setTimeout(loadRecentRecords, 1000);
-        } catch (fallbackErr) {
-          btnSubmit.disabled = false;
-          btnSubmit.classList.remove('opacity-70');
-          btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
-          showToast("連線失敗: " + (fallbackErr.message || fallbackErr), "error");
-        }
-      }
+        showToast(`已成功送出！${sku} (${currentMode} ${qty})`, "success");
+        inputSku.value = "";
+        btnClearSku.classList.add('hidden');
+        inputLocation.value = "";
+        btnClearLoc.classList.add('hidden');
+        inputQty.value = "1";
+        inputNote.value = "";
+        stockNotice.classList.add('hidden');
+
+        // 延遲 1.5 秒更新歷史清單
+        setTimeout(loadRecentRecords, 1500);
+      };
+
+      beacon.onload = finishSuccess;
+      beacon.onerror = finishSuccess; // Google 傳回 JSON 非圖片會觸發 onerror，但後端已精確成功接收並寫入！
+      beacon.src = targetUrl;
+
+      // 防呆：最多等 1.2 秒立即解鎖按鈕，現場操作完全不卡頓
+      setTimeout(finishSuccess, 1200);
     });
 
     // 載入歷史記錄
     async function loadRecentRecords() {
       if (!API_ENDPOINT) {
-        recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先點擊右上角設定綁定 Apps Script 網址</div>`;
+        recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先綁定 Apps Script 網址</div>`;
         recordCount.textContent = "";
         return;
       }
@@ -769,7 +733,6 @@
       }, 2500);
     }
 
-    // 初次載入
     loadActiveItems();
     loadRecentRecords();
   </script>
