@@ -494,6 +494,7 @@
   let tokenClient = null;
   let cachedSkuReport = []; // Stores { sku, loc, balance } from 貨架[報表]
   let validLocations = []; // Stores valid locations from List!D2:D
+  let cachedRecentList = []; // Stores recent records in memory
   let editModalInstance = null;
   let scannerModalInstance = null;
 
@@ -1248,6 +1249,50 @@
     listEl.prepend(div);
   }
 
+  // Helper to render recent list from cachedRecentList array
+  function renderRecentRecordsUI() {
+    const listEl = document.getElementById('recentList');
+    if (!listEl) return;
+
+    if (!cachedRecentList || cachedRecentList.length === 0) {
+      listEl.innerHTML = '<div class="p-3 text-center text-muted small">目前尚無記錄。</div>';
+      return;
+    }
+
+    let html = '';
+    cachedRecentList.forEach(item => {
+      const isOut = item.type === '3 Out' || item.type === '出庫' || (item.type && item.type.includes('Out'));
+      const badgeClass = isOut ? 'badge-out' : 'badge-in';
+
+      html += `
+        <div class="recent-item" id="recent-row-${item.actualRow}">
+          <div style="flex: 1; min-width: 0;" class="me-2">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="badge status-badge ${badgeClass}">${item.type}</span>
+              <strong class="text-truncate" style="font-size: 1rem;">${item.sku}</strong>
+              <span class="fw-bold ${isOut ? 'text-danger' : 'text-success'}">${item.qty}</span>
+              ${item.isOptimistic ? '<span class="badge bg-secondary-subtle text-secondary" style="font-size: 0.7rem;">剛剛</span>' : ''}
+            </div>
+            <div class="text-muted small d-flex flex-wrap gap-2">
+              <span><i class="bi bi-geo-alt"></i> ${item.loc || '無儲位'}</span>
+              <span><i class="bi bi-person"></i> ${item.who || '未知'}</span>
+              <span><i class="bi bi-clock"></i> ${item.date}</span>
+              ${item.note ? `<span><i class="bi bi-chat-dots"></i> ${item.note}</span>` : ''}
+            </div>
+          </div>
+          <div>
+            ${item.actualRow !== '新' ? `
+            <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="openEditModal(${item.actualRow}, '${encodeURIComponent(JSON.stringify(item))}')">
+              <i class="bi bi-pencil"></i>
+            </button>` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    listEl.innerHTML = html;
+  }
+
   // 4. Load Recent Records from 貨架[填單]!A:G
   async function loadRecentRecords() {
     const listEl = document.getElementById('recentList');
@@ -1255,7 +1300,8 @@
     try {
       const rows = await apiGetValues("'貨架[填單]'!A2:G");
       if (rows.length === 0) {
-        listEl.innerHTML = '<div class="p-3 text-center text-muted small">目前尚無記錄。</div>';
+        cachedRecentList = [];
+        renderRecentRecordsUI();
         return;
       }
 
@@ -1272,41 +1318,13 @@
       })).filter(item => item.sku || item.date);
 
       // Take last 15, reverse order
-      const recent = indexedRows.slice(-15).reverse();
-
-      let html = '';
-      recent.forEach(item => {
-        const isOut = item.type === '3 Out' || item.type === '出庫' || item.type.includes('Out');
-        const badgeClass = isOut ? 'badge-out' : 'badge-in';
-
-        html += `
-          <div class="recent-item">
-            <div style="flex: 1; min-width: 0;" class="me-2">
-              <div class="d-flex align-items-center gap-2 mb-1">
-                <span class="badge status-badge ${badgeClass}">${item.type}</span>
-                <strong class="text-truncate" style="font-size: 1rem;">${item.sku}</strong>
-                <span class="fw-bold ${isOut ? 'text-danger' : 'text-success'}">${item.qty}</span>
-              </div>
-              <div class="text-muted small d-flex flex-wrap gap-2">
-                <span><i class="bi bi-geo-alt"></i> ${item.loc || '無儲位'}</span>
-                <span><i class="bi bi-person"></i> ${item.who || '未知'}</span>
-                <span><i class="bi bi-clock"></i> ${item.date}</span>
-                ${item.note ? `<span><i class="bi bi-chat-dots"></i> ${item.note}</span>` : ''}
-              </div>
-            </div>
-            <div>
-              <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="openEditModal(${item.actualRow}, '${encodeURIComponent(JSON.stringify(item))}')">
-                <i class="bi bi-pencil"></i>
-              </button>
-            </div>
-          </div>
-        `;
-      });
-
-      listEl.innerHTML = html;
+      cachedRecentList = indexedRows.slice(-15).reverse();
+      renderRecentRecordsUI();
     } catch (err) {
       console.error('Failed to load recent records:', err);
-      listEl.innerHTML = '<div class="p-3 text-center text-danger small">載入失敗: ' + err.message + '<br>請確認 API Key 與試算表權限。</div>';
+      if (!cachedRecentList || cachedRecentList.length === 0) {
+        listEl.innerHTML = '<div class="p-3 text-center text-danger small">載入失敗: ' + err.message + '<br>請確認 API Key 與試算表權限。</div>';
+      }
     }
   }
 
@@ -1332,60 +1350,68 @@
     editModalInstance.show();
   }
 
-  // 6. Save Edited Row (Optimized with instant UI update & non-blocking sync)
+  // 6. Save Edited Row (Instant Optimistic UI update + Background Google Sheets API call)
   async function saveEditedRow() {
-    const actualRow = document.getElementById('editActualRow').value;
+    const actualRow = parseInt(document.getElementById('editActualRow').value, 10);
     const date = document.getElementById('editDate').value;
     const type = document.getElementById('editType').value;
     const sku = document.getElementById('editSku').value.trim();
     const qty = document.getElementById('editQty').value.trim();
     const loc = document.getElementById('editLoc').value.trim();
     const who = document.getElementById('editWho').value;
-    const note = document.getElementById('noteInput') ? document.getElementById('editNote').value.trim() : '';
+    const note = document.getElementById('editNote').value.trim();
 
     if (!sku || !qty || !who) {
       alert('請填寫完整必要欄位 (料號、數量、人員)！');
       return;
     }
 
-    const rowValues = [date, sku, qty, loc, type, who, note];
-    const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
+    // 1. Instantly update local memory & UI (zero wait time!)
+    const updatedItem = { actualRow, date, sku, qty, loc, type, who, note };
+    const targetIdx = cachedRecentList.findIndex(item => item.actualRow === actualRow);
+    if (targetIdx !== -1) {
+      cachedRecentList[targetIdx] = updatedItem;
+      renderRecentRecordsUI();
+    }
 
-    // Hide edit modal immediately so user isn't stuck
+    // 2. Hide edit modal and show success toast immediately
     editModalInstance.hide();
-    showLoading('正在更新試算表記錄...');
+    showToast(`✅ 第 ${actualRow} 列記錄已更新成功！`, 'success');
+
+    // 3. Sync to Google Sheets in the background
+    const rowValues = [date, sku, qty, loc, type, who, note];
+    const range = `'貨架[填單]'!A${actualRow}:G${actualRow}`;
 
     try {
       await apiUpdateValues(range, rowValues);
-      hideLoading();
-      showToast(`✅ 第 ${actualRow} 列記錄已更新成功！`, 'success');
-      // Silently sync recent records in background
-      setTimeout(loadRecentRecords, 800);
     } catch (err) {
-      hideLoading();
-      alert('更新失敗: ' + err.message);
+      alert(`後台同步失敗: ${err.message}，請檢查網路或權限`);
+      loadRecentRecords(); // Rollback/refresh if failed
     }
   }
 
-  // 7. Delete (Clear) Row (Optimized with instant UI update & non-blocking sync)
+  // 7. Delete (Clear) Row (Instant Optimistic UI update + Background Google Sheets API call)
   async function deleteRowFromEdit() {
-    const actualRow = document.getElementById('editActualRow').value;
+    const actualRow = parseInt(document.getElementById('editActualRow').value, 10);
     if (!confirm(`確定要刪除試算表中第 ${actualRow} 列的記錄嗎？\n(此操作將會清空該行內容)`)) {
       return;
     }
 
-    const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
-    editModalInstance.hide();
-    showLoading('正在刪除試算表記錄...');
+    // 1. Instantly remove from local memory & UI
+    cachedRecentList = cachedRecentList.filter(item => item.actualRow !== actualRow);
+    renderRecentRecordsUI();
 
+    // 2. Close modal and show toast
+    editModalInstance.hide();
+    showToast(`🗑️ 第 ${actualRow} 列記錄已刪除！`, 'success');
+
+    // 3. Clear from Google Sheets in background
+    const range = `'貨架[填單]'!A${actualRow}:G${actualRow}`;
     try {
       await apiClearValues(range);
-      hideLoading();
-      showToast(`🗑️ 第 ${actualRow} 列記錄已成功刪除！`, 'success');
-      setTimeout(loadRecentRecords, 800);
     } catch (err) {
-      hideLoading();
-      alert('刪除失敗: ' + err.message);
+      alert(`後台刪除失敗: ${err.message}`);
+      loadRecentRecords();
     }
   }
 </script>
