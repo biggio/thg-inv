@@ -140,6 +140,28 @@
       50% { top: 85%; }
       100% { top: 0%; }
     }
+    .scanner-hud-banner {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      z-index: 10;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    @keyframes shakeBorder {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .shake-alert {
+      animation: shakeBorder 0.4s ease-in-out;
+      border-color: #ef4444 !important;
+    }
   </style>
 </head>
 <body>
@@ -301,7 +323,11 @@
         <button type="button" class="btn-close btn-close-white" onclick="stopScanner()"></button>
       </div>
       <div class="modal-body p-3 text-center position-relative">
-        <div class="position-relative overflow-hidden rounded-3 border border-success mx-auto" style="max-width: 320px; min-height: 280px; background: #000;">
+        <div id="scannerBox" class="position-relative overflow-hidden rounded-3 border border-success mx-auto" style="max-width: 320px; min-height: 280px; background: #000;">
+          <div id="scannerHud" class="scanner-hud-banner bg-danger text-white d-none">
+            <i class="bi bi-exclamation-octagon-fill me-1"></i>
+            <span id="scannerHudText">非有效儲位</span>
+          </div>
           <div id="reader" style="width: 100%;"></div>
           <div id="laserLine" class="scan-laser position-absolute start-0 end-0 d-none" style="height: 30px; pointer-events: none;"></div>
           <div id="cameraLoading" class="position-absolute top-0 bottom-0 start-0 end-0 d-flex flex-column align-items-center justify-content-center bg-black bg-opacity-75 text-white">
@@ -447,6 +473,7 @@
   let currentScanTarget = 'sku'; // 'sku' or 'location'
   let cameraList = [];
   let currentCameraIndex = 0;
+  let scannerCooldown = false;
 
   // Initialize
   window.addEventListener('DOMContentLoaded', () => {
@@ -484,6 +511,8 @@
   async function startScanner(target, title) {
     currentScanTarget = target;
     document.getElementById('scannerTitle').innerText = title;
+    scannerCooldown = false;
+    hideScannerHud();
     scannerModalInstance.show();
 
     document.getElementById('cameraLoading').classList.remove('d-none');
@@ -570,9 +599,32 @@
       .catch(() => alert('未能辨識照片中的 QR Code，請確認條碼清晰再試'));
   }
 
+  function showScannerHud(msg, type = 'danger') {
+    const hud = document.getElementById('scannerHud');
+    const hudText = document.getElementById('scannerHudText');
+    const box = document.getElementById('scannerBox');
+    if (!hud || !hudText) return;
+
+    hudText.innerText = msg;
+    hud.className = `scanner-hud-banner bg-${type} text-white`;
+    hud.classList.remove('d-none');
+
+    if (box) {
+      box.classList.remove('shake-alert');
+      void box.offsetWidth; // trigger reflow
+      box.classList.add('shake-alert');
+    }
+  }
+
+  function hideScannerHud() {
+    const hud = document.getElementById('scannerHud');
+    const box = document.getElementById('scannerBox');
+    if (hud) hud.classList.add('d-none');
+    if (box) box.classList.remove('shake-alert');
+  }
+
   function onScanSuccess(decodedText) {
-    if (navigator.vibrate) navigator.vibrate(100);
-    stopScanner();
+    if (scannerCooldown) return;
 
     let val = decodedText.trim();
     // Support JSON format if QR code is JSON
@@ -584,6 +636,8 @@
     }
 
     if (currentScanTarget === 'sku') {
+      if (navigator.vibrate) navigator.vibrate(100);
+      stopScanner();
       document.getElementById('skuInput').value = val;
       onSkuChanged();
       queryCurrentStock();
@@ -597,20 +651,28 @@
         // Check if val matches any valid location (case-insensitive trim match)
         const matched = validLocations.find(l => l.toLowerCase() === val.toLowerCase());
         if (matched) {
+          // Success! Vibrate, close scanner and populate
+          if (navigator.vibrate) navigator.vibrate(100);
+          stopScanner();
           document.getElementById('locInput').value = matched;
           const fb = document.getElementById('locFeedback');
           if (fb) {
             fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>儲位驗證有效：' + matched + '</span>';
           }
         } else {
-          alert('⚠️ 掃描到的儲位「' + val + '」不在「List」分頁 D 欄有效清單內！\n請確認條碼是否正確。');
-          const fb = document.getElementById('locFeedback');
-          if (fb) {
-            fb.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>無效儲位：' + val + '</span>';
-          }
-          return;
+          // Invalid location: do NOT close camera, alert on HUD, vibrate error, keep camera running!
+          if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+          showScannerHud(`⚠️「${val}」非有效儲位，請重新對準儲位碼`);
+          
+          // Cooldown for 1.8s before evaluating the same/next barcode so it doesn't stutter
+          scannerCooldown = true;
+          setTimeout(() => {
+            scannerCooldown = false;
+          }, 1800);
         }
       } else {
+        if (navigator.vibrate) navigator.vibrate(100);
+        stopScanner();
         document.getElementById('locInput').value = val;
       }
     }
