@@ -1,10 +1,6 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取、寫入、修改、刪除「貨架[填單]」A~G 欄位
- * 
- * 更新：
- * 1. 經辦人欄位改稱 "Who" (F 欄)
- * 2. 抓取「List」分頁 C 欄作為 Who (經辦人) 的下拉選單資料來源 (結合快取)
  */
 
 const SHEET_NAME = "貨架[填單]";
@@ -39,18 +35,27 @@ function getActiveItems(forceRefresh) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
+    let sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
+    if (!sheet) {
+      const sheets = ss.getSheets();
+      for (let s of sheets) {
+        if (s.getName().trim().toLowerCase() === ACTIVE_ITEM_SHEET_NAME.toLowerCase()) {
+          sheet = s;
+          break;
+        }
+      }
+    }
     if (!sheet) return { success: true, items: [] };
 
-    const finder = sheet.getRange("B2:B").createTextFinder(".+").useRegularExpression(true);
-    const results = finder.findAll();
-    const items = [];
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, items: [] };
 
-    if (results && results.length > 0) {
-      results.forEach(cell => {
-        const val = cell.getValue().toString().trim();
-        if (val) items.push(val);
-      });
+    // 直接用 getValues 最穩當，避免 TextFinder 漏抓
+    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    const items = [];
+    for (let i = 0; i < bValues.length; i++) {
+      const val = String(bValues[i][0] || '').trim();
+      if (val) items.push(val);
     }
 
     const uniqueItems = Array.from(new Set(items));
@@ -70,7 +75,7 @@ function getActiveItems(forceRefresh) {
   }
 }
 
-// 取得「List」分頁 C 欄的 Who (經辦人) 清單
+// 取得「List」分頁 C 欄的 Who (經辦人) 清單 (超穩健版，大小寫模糊匹配分頁名稱)
 function getWhoList(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_who_list";
@@ -86,25 +91,46 @@ function getWhoList(forceRefresh) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(LIST_SHEET_NAME);
-    if (!sheet) return { success: true, list: [] };
+    let sheet = ss.getSheetByName(LIST_SHEET_NAME);
+    
+    // 若找不到大小寫完全相符的，自動搜尋不分大小寫或帶空格的
+    if (!sheet) {
+      const sheets = ss.getSheets();
+      for (let s of sheets) {
+        if (s.getName().trim().toLowerCase() === LIST_SHEET_NAME.toLowerCase()) {
+          sheet = s;
+          break;
+        }
+      }
+    }
 
-    // 抓取 C2:C
-    const finder = sheet.getRange("C2:C").createTextFinder(".+").useRegularExpression(true);
-    const results = finder.findAll();
+    if (!sheet) {
+      // 若真的找不到 List 工作表，回傳目前試算表所有工作表名稱以利除錯
+      const allSheetNames = ss.getSheets().map(s => s.getName());
+      return { success: false, error: "找不到名為 'List' 的工作表。現有分頁：" + allSheetNames.join(', '), list: [] };
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return { success: true, list: [] };
+    }
+
+    // 抓取 C 欄（從 C2 到最後一行）
+    const cValues = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
     const whoList = [];
 
-    if (results && results.length > 0) {
-      results.forEach(cell => {
-        const val = cell.getValue().toString().trim();
-        if (val) whoList.push(val);
-      });
+    for (let i = 0; i < cValues.length; i++) {
+      const val = String(cValues[i][0] || '').trim();
+      if (val) {
+        whoList.push(val);
+      }
     }
 
     const uniqueWho = Array.from(new Set(whoList));
     const response = {
       success: true,
       list: uniqueWho,
+      count: uniqueWho.length,
       updatedAt: new Date().getTime()
     };
 
@@ -260,7 +286,7 @@ function updateRecord(data) {
       qty,
       location,
       typeFormatted,
-      operator, // F: Who
+      operator,
       note
     ]]);
 
@@ -377,7 +403,7 @@ function submitRecord(data) {
       qty,
       location,
       typeFormatted,
-      operator, // F: Who
+      operator,
       note
     ]]);
     
