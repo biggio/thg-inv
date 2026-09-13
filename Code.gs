@@ -5,7 +5,6 @@
 
 const SHEET_NAME = "貨架[填單]";
 const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
-const LIST_SHEET_NAME = "List";
 
 // 高性能查找 A 欄最後有內容的行號
 function getActualLastRowFast(sheet) {
@@ -17,6 +16,12 @@ function getActualLastRowFast(sheet) {
     }
   } catch (e) {}
   return Math.max(1, sheet.getLastRow());
+}
+
+// 取得試算表中所有現存的分頁名稱（診斷用）
+function getAllSheetNames() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheets().map(s => s.getName());
 }
 
 // 取得「Active_Item」分頁 B 欄可用料號
@@ -50,7 +55,6 @@ function getActiveItems(forceRefresh) {
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return { success: true, items: [] };
 
-    // 直接用 getValues 最穩當，避免 TextFinder 漏抓
     const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
     const items = [];
     for (let i = 0; i < bValues.length; i++) {
@@ -75,7 +79,7 @@ function getActiveItems(forceRefresh) {
   }
 }
 
-// 取得「List」分頁 C 欄的 Who (經辦人) 清單 (超穩健版，大小寫模糊匹配分頁名稱)
+// 取得 Who 人員清單（超寬容自動偵測：List、Lists、清單、人員等）
 function getWhoList(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_who_list";
@@ -91,32 +95,46 @@ function getWhoList(forceRefresh) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(LIST_SHEET_NAME);
+    const allSheets = ss.getSheets();
+    const sheetNames = allSheets.map(s => s.getName());
+
+    // 依序嘗試多種可能的分頁名稱
+    let targetSheet = null;
+    const candidates = ['list', 'lists', '清單', '人員', '經辦人', '名單', 'who'];
     
-    // 若找不到大小寫完全相符的，自動搜尋不分大小寫或帶空格的
-    if (!sheet) {
-      const sheets = ss.getSheets();
-      for (let s of sheets) {
-        if (s.getName().trim().toLowerCase() === LIST_SHEET_NAME.toLowerCase()) {
-          sheet = s;
+    // 1. 完全相同或大小寫不拘
+    for (let s of allSheets) {
+      const sName = s.getName().trim().toLowerCase();
+      if (sName === 'list' || candidates.includes(sName)) {
+        targetSheet = s;
+        break;
+      }
+    }
+
+    // 2. 包含 'list' 字眼
+    if (!targetSheet) {
+      for (let s of allSheets) {
+        if (s.getName().toLowerCase().includes('list')) {
+          targetSheet = s;
           break;
         }
       }
     }
 
-    if (!sheet) {
-      // 若真的找不到 List 工作表，回傳目前試算表所有工作表名稱以利除錯
-      const allSheetNames = ss.getSheets().map(s => s.getName());
-      return { success: false, error: "找不到名為 'List' 的工作表。現有分頁：" + allSheetNames.join(', '), list: [] };
+    if (!targetSheet) {
+      return {
+        success: false,
+        error: "找不到 List 分頁。目前試算表所有分頁為：[" + sheetNames.join(', ') + "]"
+      };
     }
 
-    const lastRow = sheet.getLastRow();
+    const lastRow = targetSheet.getLastRow();
     if (lastRow <= 1) {
-      return { success: true, list: [] };
+      return { success: true, list: [], sheetFound: targetSheet.getName() };
     }
 
-    // 抓取 C 欄（從 C2 到最後一行）
-    const cValues = sheet.getRange(2, 3, lastRow - 1, 1).getValues();
+    // 讀取 C 欄 (第 3 欄)
+    const cValues = targetSheet.getRange(2, 3, lastRow - 1, 1).getValues();
     const whoList = [];
 
     for (let i = 0; i < cValues.length; i++) {
@@ -130,6 +148,7 @@ function getWhoList(forceRefresh) {
     const response = {
       success: true,
       list: uniqueWho,
+      sheetFound: targetSheet.getName(),
       count: uniqueWho.length,
       updatedAt: new Date().getTime()
     };
@@ -164,6 +183,8 @@ function doGet(e) {
       result = getActiveItems(params.force === '1');
     } else if (params.action === 'getWhoList') {
       result = getWhoList(params.force === '1');
+    } else if (params.action === 'getSheets') {
+      result = { success: true, sheets: getAllSheetNames() };
     } else {
       result = { status: "online", message: "THG 庫存管理 API 運作中" };
     }
@@ -237,7 +258,7 @@ function getRecentRecords() {
         qty: Number(row[2]) || 0,
         location: String(row[3] || '').trim(),
         type: String(row[4] || '').trim(),
-        operator: String(row[5] || '').trim(), // Who
+        operator: String(row[5] || '').trim(),
         note: String(row[6] || '').trim()
       });
     }
@@ -267,7 +288,7 @@ function updateRecord(data) {
     let rawType = String(data.type || '').trim();
     let typeFormatted = (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') ? "3 Out" : "1 In";
     
-    const operator = String(data.operator || '').trim(); // Who
+    const operator = String(data.operator || '').trim();
     const note = String(data.note || '').trim();
     
     let formattedDate = data.date;
@@ -387,7 +408,7 @@ function submitRecord(data) {
     let rawType = String(data.type || '').trim();
     let typeFormatted = (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') ? "3 Out" : "1 In";
     
-    const operator = String(data.operator || '').trim(); // Who
+    const operator = String(data.operator || '').trim();
     const note = String(data.note || '').trim();
     
     if (!sku) throw new Error("料號不能為空");
