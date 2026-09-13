@@ -12,7 +12,6 @@ const REPORT_SHEET_NAME = "貨架[報表]";
 function createResponse(data, callback) {
   const jsonStr = JSON.stringify(data);
   if (callback) {
-    // 支援 JSONP 模式 (100% 免疫任何 CORS / 302 重導向攔截)
     return ContentService.createTextOutput(callback + "(" + jsonStr + ")")
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
@@ -20,21 +19,15 @@ function createResponse(data, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 高性能查找 A 欄最後有內容的行號
+// 查找 A 欄最後有內容的行號 (精準穩健版)
 function getActualLastRowFast(sheet) {
   try {
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return 1;
-
-    // 抓取最後 500 行範圍內搜尋，避免超大表格卡頓
-    const startCheck = Math.max(1, lastRow - 500);
-    const numCheck = lastRow - startCheck + 1;
-    const aVals = sheet.getRange(startCheck, 1, numCheck, 1).getValues();
-
+    const maxRows = sheet.getMaxRows();
+    const aVals = sheet.getRange(1, 1, maxRows, 1).getValues();
     for (let r = aVals.length - 1; r >= 0; r--) {
       const v = aVals[r][0];
       if (v !== "" && v !== null && v !== undefined) {
-        return startCheck + r;
+        return r + 1;
       }
     }
   } catch (e) {}
@@ -173,7 +166,7 @@ function getWhoList(forceRefresh) {
   }
 }
 
-// 查詢結存 (貨架[報表]：料號 A, 儲位 B, 結存數 G)
+// 查詢結存 (直接讀取「貨架[報表]」：料號 A, 儲位 B, 結存數 G)
 function queryStock(sku) {
   try {
     if (!sku) return { success: true, stockMap: {}, total: 0 };
@@ -191,26 +184,31 @@ function queryStock(sku) {
     }
 
     if (!sheet) {
-      return { success: false, error: "找不到「" + REPORT_SHEET_NAME + "」分頁", stockMap: {}, total: 0 };
+      const sheetNames = ss.getSheets().map(s => s.getName());
+      return { success: false, error: "找不到「" + REPORT_SHEET_NAME + "」分頁。現有分頁：[" + sheetNames.join(', ') + "]", stockMap: {}, total: 0 };
     }
     
-    const textFinder = sheet.getRange("A:A").createTextFinder(sku).matchEntireCell(true);
-    const foundCells = textFinder.findAll();
-    
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return { success: true, sku: sku, stockMap: {}, total: 0, sheet: sheet.getName() };
+    }
+
+    // 直接讀取 A 欄(1) 到 G 欄(7) 陣列，完全避免 TextFinder 格式匹配失敗
+    const rows = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
     const stockMap = {};
     let total = 0;
-    
-    if (foundCells && foundCells.length > 0) {
-      foundCells.forEach(cell => {
-        const row = cell.getRow();
-        if (row === 1) return;
+    const targetSkuLower = sku.toLowerCase();
 
-        const locVal = String(sheet.getRange(row, 2).getValue() || '未指定儲位').trim();
-        const qtyVal = Number(sheet.getRange(row, 7).getValue()) || 0;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowSku = String(row[0] || '').trim();
+      if (rowSku.toLowerCase() === targetSkuLower) {
+        const locVal = String(row[1] || '未指定儲位').trim();
+        const qtyVal = Number(row[6]) || 0; // G 欄是第 7 欄 (index 6)
         
         stockMap[locVal] = (stockMap[locVal] || 0) + qtyVal;
         total += qtyVal;
-      });
+      }
     }
     
     return {
@@ -225,7 +223,7 @@ function queryStock(sku) {
   }
 }
 
-// 取得最近記錄 (最多 20 筆，容錯增強版)
+// 取得最近記錄 (最多 20 筆)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -238,7 +236,7 @@ function getRecentRecords() {
         }
       }
     }
-    if (!sheet) return { success: false, error: "找不到「貨架[填單]」工作表", records: [] };
+    if (!sheet) return { success: false, error: "找不到「" + SHEET_NAME + "」工作表", records: [] };
     
     const actualLastRow = getActualLastRowFast(sheet);
     if (actualLastRow <= 1) {
@@ -357,6 +355,14 @@ function submitRecord(data) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
+      for (let s of ss.getSheets()) {
+        if (s.getName().includes('填單')) {
+          sheet = s;
+          break;
+        }
+      }
+    }
+    if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAME);
       sheet.getRange(1, 1, 1, 7).setValues([["日期", "料號", "數量", "儲位", "進或出", "Who", "備註"]]);
     }
@@ -406,7 +412,7 @@ function submitRecord(data) {
 // 處理 GET 請求
 function doGet(e) {
   const params = (e && e.parameter) ? e.parameter : {};
-  const callback = params.callback; // 支援 JSONP
+  const callback = params.callback; // JSONP
   let result = {};
 
   try {

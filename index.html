@@ -357,10 +357,10 @@
 
     lucide.createIcons();
 
-    // 通用 JSONP 讀取函式 (100% 避開 CORS / 302 跳轉限制)
-    function jsonpFetch(url) {
+    // 通用 JSONP 呼叫函式 (保證不受 CORS / 302 重新導向阻擋)
+    function jsonpCall(url, params = {}) {
       return new Promise((resolve, reject) => {
-        const callbackName = 'thg_cb_' + Math.round(100000 * Math.random());
+        const callbackName = 'thg_cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
         const script = document.createElement('script');
         
         const cleanup = () => {
@@ -375,20 +375,21 @@
 
         script.onerror = () => {
           cleanup();
-          reject(new Error('網路連線失敗或後端未回應'));
+          reject(new Error('網路傳輸失敗或服務器無回應'));
         };
 
+        const allParams = { ...params, callback: callbackName };
+        const qs = new URLSearchParams(allParams).toString();
         const delimiter = url.includes('?') ? '&' : '?';
-        script.src = `${url}${delimiter}callback=${callbackName}`;
+        script.src = `${url}${delimiter}${qs}`;
         document.body.appendChild(script);
 
-        // 超時處理 10 秒
         setTimeout(() => {
           if (window[callbackName]) {
             cleanup();
             reject(new Error('連線超時'));
           }
-        }, 10000);
+        }, 12000);
       });
     }
 
@@ -555,7 +556,7 @@
 
       skuSourceHint.textContent = `同步品項中...`;
       try {
-        const data = await jsonpFetch(`${API_ENDPOINT}?action=getActiveItems${force ? '&force=1' : ''}`);
+        const data = await jsonpCall(API_ENDPOINT, { action: 'getActiveItems', force: force ? '1' : '0' });
         if (data.success && data.items) {
           activeItemList = data.items;
           localStorage.setItem(LOCAL_ITEMS_KEY, JSON.stringify(activeItemList));
@@ -577,7 +578,7 @@
       }
 
       try {
-        const data = await jsonpFetch(`${API_ENDPOINT}?action=getWhoList${force ? '&force=1' : ''}`);
+        const data = await jsonpCall(API_ENDPOINT, { action: 'getWhoList', force: force ? '1' : '0' });
         if (data.success) {
           if (data.list && data.list.length > 0) {
             whoList = data.list;
@@ -589,7 +590,7 @@
             showToast("List 分頁 C 欄為空白", "info");
           }
         } else {
-          selectWho.innerHTML = `<option value="">載入失敗: ${data.error || '未知錯誤'}</option>`;
+          selectWho.innerHTML = `<option value="">載入失敗</option>`;
           showToast(data.error || "無法讀取 List 分頁", "error");
         }
       } catch (err) {
@@ -782,7 +783,7 @@
       stockNoticeContent.innerHTML = `<span class="animate-pulse">查詢【${sku}】報表結存中...</span>`;
 
       try {
-        const data = await jsonpFetch(`${API_ENDPOINT}?action=queryStock&sku=${encodeURIComponent(sku)}`);
+        const data = await jsonpCall(API_ENDPOINT, { action: 'queryStock', sku: sku });
         if (data.success) {
           const keys = Object.keys(data.stockMap);
           if (keys.length === 0) {
@@ -799,8 +800,8 @@
       }
     }
 
-    // 表單提交
-    document.getElementById('stockForm').addEventListener('submit', (e) => {
+    // 表單提交：使用 JSONP 確保收到後端明確的「寫入成功」確認
+    document.getElementById('stockForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!API_ENDPOINT) {
@@ -833,39 +834,34 @@
         note: note
       };
 
-      const qs = new URLSearchParams(postData).toString();
-      const targetUrl = `${API_ENDPOINT}?${qs}`;
-
-      const beacon = new Image();
-      let isDone = false;
-
-      const finishSuccess = () => {
-        if (isDone) return;
-        isDone = true;
+      try {
+        const res = await jsonpCall(API_ENDPOINT, postData);
         btnSubmit.disabled = false;
         btnSubmit.classList.remove('opacity-70');
         btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
 
-        showToast(`已成功送出！${sku} (${currentMode} ${qty})`, "success");
-        inputSku.value = "";
-        btnClearSku.classList.add('hidden');
-        inputLocation.value = "";
-        btnClearLoc.classList.add('hidden');
-        inputQty.value = "1";
-        inputNote.value = "";
-        stockNotice.classList.add('hidden');
-
-        setTimeout(loadRecentRecords, 1500);
-      };
-
-      beacon.onload = finishSuccess;
-      beacon.onerror = finishSuccess;
-      beacon.src = targetUrl;
-
-      setTimeout(finishSuccess, 1200);
+        if (res.success) {
+          showToast(`已成功寫入！${sku} (${currentMode} ${qty})`, "success");
+          inputSku.value = "";
+          btnClearSku.classList.add('hidden');
+          inputLocation.value = "";
+          btnClearLoc.classList.add('hidden');
+          inputQty.value = "1";
+          inputNote.value = "";
+          stockNotice.classList.add('hidden');
+          loadRecentRecords();
+        } else {
+          showToast("寫入失敗: " + (res.error || '未知錯誤'), "error");
+        }
+      } catch (err) {
+        btnSubmit.disabled = false;
+        btnSubmit.classList.remove('opacity-70');
+        btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
+        showToast("送出失敗: " + (err.message || err), "error");
+      }
     });
 
-    // 【核心修復】：採用 JSONP 抓取近期記錄（100% 避開 CORS / 302 跨來源阻擋）
+    // 抓取近期記錄
     async function loadRecentRecords() {
       if (!API_ENDPOINT) {
         recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先綁定 Apps Script 網址</div>`;
@@ -875,7 +871,7 @@
 
       recordCount.textContent = "載入中...";
       try {
-        const data = await jsonpFetch(`${API_ENDPOINT}?action=getRecords`);
+        const data = await jsonpCall(API_ENDPOINT, { action: 'getRecords' });
         if (data.success && data.records) {
           recentRecordsCache = data.records;
           renderRecords(data.records);
@@ -950,7 +946,7 @@
       editModal.classList.add('hidden');
     };
 
-    document.getElementById('editForm').addEventListener('submit', (e) => {
+    document.getElementById('editForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const rowIndex = editRowIndex.value;
       if (!rowIndex) return;
@@ -970,29 +966,25 @@
         note: editNote.value.trim()
       };
 
-      const qs = new URLSearchParams(postData).toString();
-      const targetUrl = `${API_ENDPOINT}?${qs}`;
-
-      const beacon = new Image();
-      let done = false;
-
-      const finishEdit = () => {
-        if (done) return;
-        done = true;
+      try {
+        const res = await jsonpCall(API_ENDPOINT, postData);
         btnSaveEdit.disabled = false;
         btnSaveEdit.textContent = "儲存更新";
-        closeEditModal();
-        showToast(`第 ${rowIndex} 行記錄已更新成功！`, 'success');
-        setTimeout(loadRecentRecords, 1500);
-      };
-
-      beacon.onload = finishEdit;
-      beacon.onerror = finishEdit;
-      beacon.src = targetUrl;
-      setTimeout(finishEdit, 1200);
+        if (res.success) {
+          closeEditModal();
+          showToast(`第 ${rowIndex} 行記錄已更新成功！`, 'success');
+          loadRecentRecords();
+        } else {
+          showToast("更新失敗: " + (res.error || ''), 'error');
+        }
+      } catch (err) {
+        btnSaveEdit.disabled = false;
+        btnSaveEdit.textContent = "儲存更新";
+        showToast("連線失敗: " + err.message, 'error');
+      }
     });
 
-    btnDeleteRecord.addEventListener('click', () => {
+    btnDeleteRecord.addEventListener('click', async () => {
       const rowIndex = editRowIndex.value;
       if (!rowIndex) return;
 
@@ -1003,31 +995,22 @@
       btnDeleteRecord.disabled = true;
       btnDeleteRecord.textContent = "刪除中...";
 
-      const postData = {
-        action: 'delete',
-        rowIndex: rowIndex
-      };
-
-      const qs = new URLSearchParams(postData).toString();
-      const targetUrl = `${API_ENDPOINT}?${qs}`;
-
-      const beacon = new Image();
-      let done = false;
-
-      const finishDelete = () => {
-        if (done) return;
-        done = true;
+      try {
+        const res = await jsonpCall(API_ENDPOINT, { action: 'delete', rowIndex: rowIndex });
         btnDeleteRecord.disabled = false;
         btnDeleteRecord.textContent = "刪除整行";
-        closeEditModal();
-        showToast(`第 ${rowIndex} 行記錄已成功刪除！`, 'success');
-        setTimeout(loadRecentRecords, 1500);
-      };
-
-      beacon.onload = finishDelete;
-      beacon.onerror = finishDelete;
-      beacon.src = targetUrl;
-      setTimeout(finishDelete, 1200);
+        if (res.success) {
+          closeEditModal();
+          showToast(`第 ${rowIndex} 行記錄已成功刪除！`, 'success');
+          loadRecentRecords();
+        } else {
+          showToast("刪除失敗: " + (res.error || ''), 'error');
+        }
+      } catch (err) {
+        btnDeleteRecord.disabled = false;
+        btnDeleteRecord.textContent = "刪除整行";
+        showToast("連線失敗: " + err.message, 'error');
+      }
     });
 
     btnRefresh.addEventListener('click', () => {
