@@ -226,10 +226,14 @@
           <div class="col-6">
             <label class="form-label">儲位 (Location)</label>
             <div class="input-group">
-              <input type="text" class="form-control form-control-lg" id="locInput" placeholder="儲位代號" autocomplete="off">
+              <input type="text" class="form-control form-control-lg" id="locInput" list="locDatalist" placeholder="儲位代號" autocomplete="off">
               <button class="btn btn-outline-secondary" type="button" onclick="startScanner('location', '掃描儲位 QR Code')" title="掃描儲位 QR Code">
                 <i class="bi bi-qr-code"></i>
               </button>
+            </div>
+            <datalist id="locDatalist"></datalist>
+            <div id="locFeedback" class="form-text text-muted small mt-1">
+              可輸入或掃描 List 內之有效儲位。
             </div>
           </div>
         </div>
@@ -434,6 +438,7 @@
   let currentToken = null;
   let tokenClient = null;
   let cachedSkuReport = []; // Stores { sku, loc, balance } from 貨架[報表]
+  let validLocations = []; // Stores valid locations from List!D2:D
   let editModalInstance = null;
   let scannerModalInstance = null;
 
@@ -588,7 +593,26 @@
         setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
       }
     } else if (currentScanTarget === 'location') {
-      document.getElementById('locInput').value = val;
+      if (validLocations.length > 0) {
+        // Check if val matches any valid location (case-insensitive trim match)
+        const matched = validLocations.find(l => l.toLowerCase() === val.toLowerCase());
+        if (matched) {
+          document.getElementById('locInput').value = matched;
+          const fb = document.getElementById('locFeedback');
+          if (fb) {
+            fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>儲位驗證有效：' + matched + '</span>';
+          }
+        } else {
+          alert('⚠️ 掃描到的儲位「' + val + '」不在「List」分頁 D 欄有效清單內！\n請確認條碼是否正確。');
+          const fb = document.getElementById('locFeedback');
+          if (fb) {
+            fb.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>無效儲位：' + val + '</span>';
+          }
+          return;
+        }
+      } else {
+        document.getElementById('locInput').value = val;
+      }
     }
   }
 
@@ -814,6 +838,7 @@
     try {
       await Promise.allSettled([
         loadWhoList(),
+        loadLocationList(),
         refreshSkuList(),
         loadRecentRecords()
       ]);
@@ -848,6 +873,33 @@
     } catch (err) {
       console.error('Failed to load Who:', err);
       whoSelect.innerHTML = '<option value="">載入失敗 (請確認 API Key / 權限)</option>';
+    }
+  }
+
+  // 1b. Load Valid Locations from List!D2:D
+  async function loadLocationList() {
+    const locDatalist = document.getElementById('locDatalist');
+    try {
+      const rows = await apiGetValues("'List'!D2:D");
+      validLocations = [];
+      if (locDatalist) locDatalist.innerHTML = '';
+
+      rows.forEach(r => {
+        if (r && r[0] && r[0].toString().trim()) {
+          const loc = r[0].toString().trim();
+          if (!validLocations.includes(loc)) {
+            validLocations.push(loc);
+            if (locDatalist) {
+              const opt = document.createElement('option');
+              opt.value = loc;
+              locDatalist.appendChild(opt);
+            }
+          }
+        }
+      });
+      console.log('Loaded ' + validLocations.length + ' valid locations from List!D2:D');
+    } catch (err) {
+      console.error('Failed to load Location list:', err);
     }
   }
 
@@ -964,6 +1016,15 @@
     if (!sku || !qty || !who) {
       alert('請填寫完整必要欄位 (料號、數量、人員)！');
       return;
+    }
+
+    if (loc && validLocations.length > 0) {
+      const matchLoc = validLocations.find(l => l.toLowerCase() === loc.toLowerCase());
+      if (!matchLoc) {
+        if (!confirm(`⚠️ 提醒：儲位「${loc}」未在「List」分頁 D 欄有效名單中。\n是否仍確定要以「${loc}」送出？`)) {
+          return;
+        }
+      }
     }
 
     const now = new Date();
