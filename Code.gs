@@ -1,10 +1,15 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取、寫入、修改、刪除「貨架[填單]」A~G 欄位
+ * 
+ * 更新：
+ * 1. 經辦人欄位改稱 "Who" (F 欄)
+ * 2. 抓取「List」分頁 C 欄作為 Who (經辦人) 的下拉選單資料來源 (結合快取)
  */
 
 const SHEET_NAME = "貨架[填單]";
 const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
+const LIST_SHEET_NAME = "List";
 
 // 高性能查找 A 欄最後有內容的行號
 function getActualLastRowFast(sheet) {
@@ -65,6 +70,54 @@ function getActiveItems(forceRefresh) {
   }
 }
 
+// 取得「List」分頁 C 欄的 Who (經辦人) 清單
+function getWhoList(forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "thg_who_list";
+
+  if (!forceRefresh) {
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(LIST_SHEET_NAME);
+    if (!sheet) return { success: true, list: [] };
+
+    // 抓取 C2:C
+    const finder = sheet.getRange("C2:C").createTextFinder(".+").useRegularExpression(true);
+    const results = finder.findAll();
+    const whoList = [];
+
+    if (results && results.length > 0) {
+      results.forEach(cell => {
+        const val = cell.getValue().toString().trim();
+        if (val) whoList.push(val);
+      });
+    }
+
+    const uniqueWho = Array.from(new Set(whoList));
+    const response = {
+      success: true,
+      list: uniqueWho,
+      updatedAt: new Date().getTime()
+    };
+
+    try {
+      cache.put(cacheKey, JSON.stringify(response), 21600);
+    } catch (cacheErr) {}
+
+    return response;
+  } catch (err) {
+    return { success: false, error: err.toString(), list: [] };
+  }
+}
+
 // 處理 GET 請求
 function doGet(e) {
   const params = (e && e.parameter) ? e.parameter : {};
@@ -83,6 +136,8 @@ function doGet(e) {
       result = queryStock(params.sku);
     } else if (params.action === 'getActiveItems') {
       result = getActiveItems(params.force === '1');
+    } else if (params.action === 'getWhoList') {
+      result = getWhoList(params.force === '1');
     } else {
       result = { status: "online", message: "THG 庫存管理 API 運作中" };
     }
@@ -124,7 +179,7 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 取得最近記錄 (回傳精確行號 rowIndex 供編輯與刪除)
+// 取得最近記錄 (最多 20 筆)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -150,13 +205,13 @@ function getRecentRecords() {
         dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
       }
       records.push({
-        rowIndex: startRow + i, // 精確試算表實體行號 (如: 第 45 行)
+        rowIndex: startRow + i,
         date: String(dateVal),
         sku: String(row[1] || '').trim(),
         qty: Number(row[2]) || 0,
         location: String(row[3] || '').trim(),
         type: String(row[4] || '').trim(),
-        operator: String(row[5] || '').trim(),
+        operator: String(row[5] || '').trim(), // Who
         note: String(row[6] || '').trim()
       });
     }
@@ -186,10 +241,9 @@ function updateRecord(data) {
     let rawType = String(data.type || '').trim();
     let typeFormatted = (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') ? "3 Out" : "1 In";
     
-    const operator = String(data.operator || '').trim();
+    const operator = String(data.operator || '').trim(); // Who
     const note = String(data.note || '').trim();
     
-    // 日期若無更新則保留原格內容
     let formattedDate = data.date;
     if (!formattedDate) {
       const existingDate = sheet.getRange(rowIndex, 1).getValue();
@@ -206,7 +260,7 @@ function updateRecord(data) {
       qty,
       location,
       typeFormatted,
-      operator,
+      operator, // F: Who
       note
     ]]);
 
@@ -218,7 +272,7 @@ function updateRecord(data) {
   }
 }
 
-// 刪除特定行號的記錄 (清除該行內容，或刪除整行)
+// 刪除特定行號的記錄
 function deleteRecord(rowIndex) {
   const lock = LockService.getScriptLock();
   try {
@@ -230,7 +284,6 @@ function deleteRecord(rowIndex) {
     const sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) throw new Error("找不到工作表");
 
-    // 刪除該行
     sheet.deleteRow(rowIndex);
 
     return { success: true, message: `已成功刪除第 ${rowIndex} 行記錄` };
@@ -295,7 +348,7 @@ function submitRecord(data) {
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAME);
-      sheet.getRange(1, 1, 1, 7).setValues([["日期", "料號", "數量", "儲位", "進或出", "經辦人", "備註"]]);
+      sheet.getRange(1, 1, 1, 7).setValues([["日期", "料號", "數量", "儲位", "進或出", "Who", "備註"]]);
     }
     
     const now = new Date();
@@ -308,7 +361,7 @@ function submitRecord(data) {
     let rawType = String(data.type || '').trim();
     let typeFormatted = (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') ? "3 Out" : "1 In";
     
-    const operator = String(data.operator || '').trim();
+    const operator = String(data.operator || '').trim(); // Who
     const note = String(data.note || '').trim();
     
     if (!sku) throw new Error("料號不能為空");
@@ -324,7 +377,7 @@ function submitRecord(data) {
       qty,
       location,
       typeFormatted,
-      operator,
+      operator, // F: Who
       note
     ]]);
     
