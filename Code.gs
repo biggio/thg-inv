@@ -58,10 +58,10 @@ function getActualLastRowFast(sheet) {
   }
 }
 
-// 取得「Active_Item」分頁 B 欄可用料號 (記憶體安全防護，上限 3000 筆)
+// 取得現有倉庫在庫料號 (讀取「貨架[報表]」B 欄，極速去重快取)
 function getActiveItems(forceRefresh) {
   const cache = CacheService.getScriptCache();
-  const cacheKey = "thg_active_items_list";
+  const cacheKey = "thg_report_sku_items_b";
 
   if (!forceRefresh) {
     const cachedData = cache.get(cacheKey);
@@ -74,10 +74,10 @@ function getActiveItems(forceRefresh) {
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
+    let sheet = ss.getSheetByName(REPORT_SHEET_NAME);
     if (!sheet) {
       for (let s of ss.getSheets()) {
-        if (s.getName().trim().toLowerCase() === ACTIVE_ITEM_SHEET_NAME.toLowerCase()) {
+        if (s.getName().includes('報表') || s.getName().toLowerCase().includes('report')) {
           sheet = s;
           break;
         }
@@ -88,13 +88,15 @@ function getActiveItems(forceRefresh) {
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return { success: true, items: [] };
 
-    // 嚴格限制讀取範圍，最多 3000 行，杜絕 50,000 空行引發 Out of Memory
+    // 安全讀取 B 欄（料號），最多抓 3000 行
     const maxRead = Math.min(lastRow - 1, 3000);
     const bValues = sheet.getRange(2, 2, maxRead, 1).getValues();
     const items = [];
     for (let i = 0; i < bValues.length; i++) {
       const val = String(bValues[i][0] || '').trim();
-      if (val) items.push(val);
+      if (val && val !== '料號' && val !== 'SKU') {
+        items.push(val);
+      }
     }
 
     const uniqueItems = Array.from(new Set(items));
@@ -102,11 +104,11 @@ function getActiveItems(forceRefresh) {
       success: true,
       items: uniqueItems,
       count: uniqueItems.length,
+      source: "貨架[報表] B欄",
       updatedAt: new Date().getTime()
     };
 
     try {
-      // 若清單較大，CacheService 上限為 100KB
       const cacheStr = JSON.stringify(response);
       if (cacheStr.length < 95000) {
         cache.put(cacheKey, cacheStr, 21600);

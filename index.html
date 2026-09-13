@@ -554,14 +554,14 @@
       const now = Date.now();
       if (!force && activeItemList.length > 0 && (now - lastSync < 3600000)) return;
 
-      skuSourceHint.textContent = `同步品項中...`;
+      skuSourceHint.textContent = `同步在庫料號中...`;
       try {
         const data = await jsonpCall(API_ENDPOINT, { action: 'getActiveItems', force: force ? '1' : '0' });
         if (data.success && data.items) {
           activeItemList = data.items;
           localStorage.setItem(LOCAL_ITEMS_KEY, JSON.stringify(activeItemList));
           localStorage.setItem(LOCAL_ITEMS_TIME_KEY, now.toString());
-          skuSourceHint.textContent = `已同步 ${activeItemList.length} 種品項`;
+          skuSourceHint.textContent = `已同步 ${activeItemList.length} 種在庫料號`;
           skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
         }
       } catch (e) {}
