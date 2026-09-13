@@ -3,1053 +3,954 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>現場庫存快速掃描系統</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <title>貨架倉儲庫存管理系統 (Direct Sheets v4)</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
+    :root {
+      --primary-color: #2563eb;
+      --success-color: #16a34a;
+      --danger-color: #dc2626;
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border-color: #e2e8f0;
+    }
     body {
-      -webkit-tap-highlight-color: transparent;
-      overscroll-behavior-y: contain;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      padding-bottom: 80px;
     }
-    #reader video {
-      border-radius: 1rem;
-      object-fit: cover;
-      width: 100% !important;
+    .header-bar {
+      background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+      color: white;
+      padding: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    .scan-laser {
-      background: linear-gradient(to bottom, rgba(16, 185, 129, 0), rgba(16, 185, 129, 0.8) 50%, rgba(16, 185, 129, 0));
-      animation: scanLaser 2s infinite ease-in-out;
+    .card-custom {
+      background: var(--card-bg);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+      margin-bottom: 20px;
+      overflow: hidden;
     }
-    @keyframes scanLaser {
-      0% { top: 0%; }
-      50% { top: 85%; }
-      100% { top: 0%; }
+    .card-header-custom {
+      background: #f1f5f9;
+      font-weight: 600;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .form-label {
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+    .btn-type {
+      height: 48px;
+      font-weight: 600;
+      font-size: 1rem;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-submit {
+      height: 52px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      border: none;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+      transition: all 0.2s;
+    }
+    .btn-submit:active {
+      transform: scale(0.98);
+    }
+    .recent-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .recent-item:last-child {
+      border-bottom: none;
+    }
+    .badge-in {
+      background-color: #dcfce7;
+      color: #15803d;
+      font-weight: 600;
+    }
+    .badge-out {
+      background-color: #fee2e2;
+      color: #b91c1c;
+      font-weight: 600;
+    }
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      backdrop-filter: blur(2px);
+    }
+    .auth-banner {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 10px 14px;
+      margin-bottom: 15px;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.85rem;
     }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen pb-12">
+<body>
 
-  <!-- 頂部導航 -->
-  <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
-    <div class="flex items-center space-x-2">
-      <i data-lucide="boxes" class="w-6 h-6 text-indigo-200"></i>
-      <h1 class="font-bold text-lg tracking-wide">貨架庫存掃描</h1>
+<!-- Header -->
+<header class="header-bar">
+  <div class="container d-flex justify-content-between align-items-center">
+    <div>
+      <h5 class="mb-0 fw-bold"><i class="bi bi-boxes me-2"></i>貨架倉儲庫存</h5>
+      <small class="opacity-75">直接直連 Sheets API (極速架構)</small>
     </div>
-    <div class="flex items-center space-x-2">
-      <button id="btnSettings" class="p-1.5 rounded-lg bg-indigo-700/80 hover:bg-indigo-800 active:scale-95 transition" title="API 設定">
-        <i data-lucide="settings" class="w-5 h-5"></i>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#settingsModal" title="設定 API Key / Client ID">
+        <i class="bi bi-gear-fill"></i>
       </button>
-      <button id="btnRefresh" class="p-1.5 rounded-lg bg-indigo-700/80 hover:bg-indigo-800 active:scale-95 transition" title="重新整理">
-        <i data-lucide="rotate-cw" class="w-5 h-5"></i>
-      </button>
-    </div>
-  </header>
-
-  <main class="max-w-md mx-auto p-4 space-y-4">
-
-    <!-- API 連線警示 -->
-    <div id="apiConfigAlert" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-3 text-amber-900 text-xs flex items-center justify-between">
-      <div class="flex items-center space-x-2">
-        <i data-lucide="alert-circle" class="w-5 h-5 text-amber-600 shrink-0"></i>
-        <span>尚未設定 Apps Script 網址，請先綁定</span>
-      </div>
-      <button onclick="openApiModal()" class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded-lg shrink-0">設定</button>
-    </div>
-
-    <!-- 操作模式切換 (1 In / 3 Out) -->
-    <div class="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex gap-2">
-      <button id="modeIn" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm">
-        <i data-lucide="arrow-down-left" class="w-5 h-5"></i>
-        <span>1 In (進庫)</span>
-      </button>
-      <button id="modeOut" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50">
-        <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
-        <span>3 Out (出庫)</span>
-      </button>
-    </div>
-
-    <!-- 即時存量提示卡片 -->
-    <div id="stockNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-900 flex items-start space-x-2">
-      <i data-lucide="info" class="w-5 h-5 text-blue-500 shrink-0 mt-0.5"></i>
-      <div id="stockNoticeContent" class="flex-1 leading-relaxed">
-        查詢中...
-      </div>
-    </div>
-
-    <!-- 主要輸入表單 (A~G 欄) -->
-    <form id="stockForm" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3.5" autocomplete="off">
-
-      <!-- B: 料號 (QR Code 掃描 + 離線快取 Auto-Complete) -->
-      <div class="relative">
-        <div class="flex items-center justify-between mb-1">
-          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            料號 (B 欄) <span class="text-rose-500">*</span>
-          </label>
-          <div class="flex items-center space-x-1">
-            <span id="skuSourceHint" class="text-[10px] text-slate-400">載入中...</span>
-            <button type="button" id="btnSyncSkus" class="text-indigo-600 hover:text-indigo-800 p-0.5" title="重新同步品項清單">
-              <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-            </button>
-          </div>
-        </div>
-        
-        <div class="flex gap-2">
-          <div class="relative flex-1">
-            <input type="text" id="inputSku" required placeholder="輸入料號 (自動聯想) 或掃描" 
-              class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-base font-mono">
-            <button type="button" id="btnClearSku" class="hidden absolute right-2.5 top-3 text-slate-400 hover:text-slate-600">
-              <i data-lucide="x" class="w-4 h-4"></i>
-            </button>
-          </div>
-          <button type="button" id="btnScanSku" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl font-medium flex items-center space-x-1.5 shadow-sm active:scale-95 transition">
-            <i data-lucide="qr-code" class="w-5 h-5"></i>
-            <span class="text-sm font-bold">掃描</span>
-          </button>
-        </div>
-
-        <div id="skuSuggestions" class="hidden absolute left-0 right-16 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100">
-        </div>
-      </div>
-
-      <!-- D: 儲位 (QR Code 掃描) -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-          儲位 (D 欄) <span class="text-rose-500">*</span>
-        </label>
-        <div class="flex gap-2">
-          <div class="relative flex-1">
-            <input type="text" id="inputLocation" required placeholder="掃描或輸入儲位 (如: A-01-02)" 
-              class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-base font-mono">
-            <button type="button" id="btnClearLoc" class="hidden absolute right-2.5 top-3 text-slate-400 hover:text-slate-600">
-              <i data-lucide="x" class="w-4 h-4"></i>
-            </button>
-          </div>
-          <button type="button" id="btnScanLoc" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl font-medium flex items-center space-x-1.5 shadow-sm active:scale-95 transition">
-            <i data-lucide="map-pin" class="w-5 h-5"></i>
-            <span class="text-sm font-bold">掃位</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- C: 數量 -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-          數量 (C 欄) <span class="text-rose-500">*</span>
-        </label>
-        <div class="flex items-center gap-2">
-          <button type="button" id="btnQtyMinus" class="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center active:scale-95 transition">-</button>
-          <input type="number" id="inputQty" required min="1" step="1" value="1" 
-            class="flex-1 py-2.5 text-center text-xl font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white">
-          <button type="button" id="btnQtyPlus" class="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center active:scale-95 transition">+</button>
-        </div>
-      </div>
-
-      <!-- 更多欄位 (F: Who 下拉選單, G: 備註) -->
-      <div class="pt-2 border-t border-slate-100 space-y-3">
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Who (F 欄) <span class="text-rose-500">*</span>
-              </label>
-              <button type="button" id="btnSyncWhoManual" class="text-[10px] text-indigo-600 hover:underline">
-                重整名單
-              </button>
-            </div>
-            <div class="relative">
-              <select id="selectWho" required
-                class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm font-medium appearance-none">
-                <option value="">載入人員中...</option>
-              </select>
-              <i data-lucide="chevron-down" class="w-4 h-4 text-slate-400 absolute right-2.5 top-3 pointer-events-none"></i>
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              備註 (G 欄)
-            </label>
-            <input type="text" id="inputNote" placeholder="批號/單號/事由" 
-              class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm">
-          </div>
-        </div>
-      </div>
-
-      <!-- 送出按鈕 -->
-      <button type="submit" id="btnSubmit" class="w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition">
-        <i data-lucide="check-circle" class="w-5 h-5"></i>
-        <span id="btnSubmitText">確認 1 In (進庫) 送出</span>
-      </button>
-    </form>
-
-    <!-- 最近提交記錄 (A~G 欄回顧，支援修改與刪除) -->
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-bold text-slate-700 flex items-center space-x-1.5">
-          <i data-lucide="history" class="w-4 h-4 text-slate-500"></i>
-          <span>近期記錄 (點擊可修改/刪除)</span>
-        </h2>
-        <div class="flex items-center space-x-2">
-          <span class="text-xs text-slate-400" id="recordCount">載入中...</span>
-          <button type="button" id="btnReloadRecords" class="text-indigo-600 hover:text-indigo-800 p-1" title="重整記錄清單">
-            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
-          </button>
-        </div>
-      </div>
-      <div id="recordList" class="space-y-2 max-h-72 overflow-y-auto pr-1">
-        <div class="text-center py-4 text-slate-400 text-sm">正在載入紀錄...</div>
-      </div>
-    </div>
-
-  </main>
-
-  <input type="file" id="fallbackFileInput" accept="image/*" capture="environment" class="hidden">
-
-  <!-- 即時相機掃描全螢幕視窗 -->
-  <div id="scannerModal" class="fixed inset-0 bg-black/95 backdrop-blur-md z-50 hidden flex flex-col justify-between p-4">
-    <div class="flex items-center justify-between text-white pt-2 px-2">
-      <div class="flex items-center space-x-2">
-        <i data-lucide="scan" class="w-6 h-6 text-emerald-400"></i>
-        <span id="scannerTitle" class="font-bold text-base">對準 QR Code 掃描</span>
-      </div>
-      <button id="btnCloseScanner" class="w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center active:scale-90 transition">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
-    </div>
-
-    <div class="w-full max-w-sm mx-auto my-auto space-y-3">
-      <div class="relative overflow-hidden rounded-2xl bg-black border-2 border-emerald-400 shadow-2xl min-h-[300px] flex items-center justify-center">
-        <div id="reader" class="w-full"></div>
-        <div id="laserLine" class="scan-laser absolute inset-x-0 h-10 pointer-events-none hidden"></div>
-        <div id="cameraLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 text-white p-4 text-center">
-          <div class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-          <p class="text-sm font-medium">正在啟動相機...</p>
-          <p class="text-xs text-slate-400 mt-1">首次開啟請點擊【允許使用相機】</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="flex items-center justify-center gap-3 pb-4">
-      <button id="btnSwitchCamera" class="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-full flex items-center space-x-2 backdrop-blur-md">
-        <i data-lucide="switch-camera" class="w-4 h-4"></i>
-        <span>切換鏡頭</span>
-      </button>
-      <button id="btnDirectCapture" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-full flex items-center space-x-2 shadow">
-        <i data-lucide="camera" class="w-4 h-4"></i>
-        <span>拍照備援</span>
+      <button id="authBtn" class="btn btn-sm btn-light fw-bold text-primary" onclick="handleAuthClick()">
+        <i class="bi bi-google me-1"></i>登入
       </button>
     </div>
   </div>
+</header>
 
-  <!-- 修改/刪除記錄 Modal -->
-  <div id="editModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5 space-y-4">
-      <div class="flex items-center justify-between border-b pb-3">
-        <h3 class="font-bold text-base text-slate-800 flex items-center space-x-2">
-          <i data-lucide="edit-3" class="w-5 h-5 text-indigo-600"></i>
-          <span>編輯試算表記錄 (<span id="editRowBadge" class="text-indigo-600"></span>)</span>
-        </h3>
-        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
+<div class="container mt-3">
+  <!-- Auth & API Status Alert -->
+  <div id="authNotice" class="auth-banner d-flex justify-content-between align-items-center">
+    <div>
+      <i class="bi bi-info-circle-fill text-primary me-1"></i>
+      <span id="authStatusText">讀取模式：已具備查詢權限。送出記錄需先點擊右上角「登入」。</span>
+    </div>
+  </div>
 
-      <form id="editForm" class="space-y-3">
-        <input type="hidden" id="editRowIndex">
-        <input type="hidden" id="editDate">
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">料號 (B)</label>
-            <input type="text" id="editSku" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono">
+  <!-- Main Card -->
+  <div class="card card-custom">
+    <div class="card-header-custom">
+      <span><i class="bi bi-pencil-square me-2 text-primary"></i>出入庫單據填報</span>
+      <span id="clockBadge" class="badge bg-secondary">--:--</span>
+    </div>
+    <div class="card-body p-3">
+      <form id="invForm" onsubmit="handleSubmit(event)">
+        
+        <!-- Type Selection -->
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <input type="radio" class="btn-check" name="typeOption" id="typeIn" value="入庫" checked onchange="handleTypeChange()">
+            <label class="btn btn-outline-success btn-type w-100" for="typeIn">
+              <i class="bi bi-box-arrow-in-down"></i> 入庫
+            </label>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">儲位 (D)</label>
-            <input type="text" id="editLocation" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">數量 (C)</label>
-            <input type="number" id="editQty" required min="1" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">進出類別 (E)</label>
-            <select id="editType" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold">
-              <option value="1 In">1 In (進庫)</option>
-              <option value="3 Out">3 Out (出庫)</option>
-            </select>
+          <div class="col-6">
+            <input type="radio" class="btn-check" name="typeOption" id="typeOut" value="出庫" onchange="handleTypeChange()">
+            <label class="btn btn-outline-danger btn-type w-100" for="typeOut">
+              <i class="bi bi-box-arrow-up"></i> 出庫
+            </label>
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Who (F)</label>
-            <select id="editSelectWho" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium">
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">備註 (G)</label>
-            <input type="text" id="editNote" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm">
-          </div>
-        </div>
-
-        <div class="flex gap-2 justify-between pt-3 border-t">
-          <button type="button" id="btnDeleteRecord" class="px-3.5 py-2 text-xs bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold rounded-xl flex items-center space-x-1">
-            <i data-lucide="trash-2" class="w-4 h-4"></i>
-            <span>刪除整行</span>
-          </button>
-          <div class="flex gap-2">
-            <button type="button" onclick="closeEditModal()" class="px-3.5 py-2 text-xs text-slate-600 font-medium">取消</button>
-            <button type="submit" id="btnSaveEdit" class="px-4 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
-              儲存更新
+        <!-- SKU Input with Suggestion -->
+        <div class="mb-3">
+          <label class="form-label d-flex justify-content-between align-items-center">
+            <span>料號 (SKU) <span class="text-danger">*</span></span>
+            <span id="stockInquiry" class="text-muted small fw-normal"></span>
+          </label>
+          <div class="input-group">
+            <input type="text" class="form-control form-control-lg" id="skuInput" list="skuDatalist" placeholder="輸入料號或選擇..." required autocomplete="off" oninput="onSkuChanged()">
+            <button class="btn btn-outline-secondary" type="button" onclick="queryCurrentStock()" title="查詢即時庫存">
+              <i class="bi bi-search"></i>
             </button>
           </div>
+          <datalist id="skuDatalist"></datalist>
+          <div id="skuHelp" class="form-text text-muted small mt-1">
+            料號提示來自 [貨架報表]，即時直接抓取。
+          </div>
         </div>
+
+        <!-- Quantity & Location -->
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">數量 <span class="text-danger">*</span></label>
+            <input type="number" class="form-control form-control-lg" id="qtyInput" min="1" step="1" placeholder="數量" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">儲位 (Location)</label>
+            <input type="text" class="form-control form-control-lg" id="locInput" placeholder="儲位代號" autocomplete="off">
+          </div>
+        </div>
+
+        <!-- Who & Note -->
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">作業人員 (Who) <span class="text-danger">*</span></label>
+            <select class="form-select form-select-lg" id="whoSelect" required>
+              <option value="">載入中...</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">備註 (Note)</label>
+            <input type="text" class="form-control form-control-lg" id="noteInput" placeholder="可空白">
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" id="submitBtn" class="btn btn-primary btn-submit w-100 mt-2">
+          <i class="bi bi-cloud-arrow-up-fill me-2"></i>確認送出
+        </button>
       </form>
     </div>
   </div>
 
-  <!-- API 設定 Modal -->
-  <div id="apiModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5 space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="font-bold text-lg text-slate-800 flex items-center space-x-2">
-          <i data-lucide="link" class="w-5 h-5 text-indigo-600"></i>
-          <span>Google Apps Script 網址設定</span>
-        </h3>
-        <button onclick="closeApiModal()" class="text-slate-400 hover:text-slate-600">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-      <p class="text-xs text-slate-500 leading-relaxed">
-        請貼上您在 Google 試算表發布的 Apps Script 網頁應用程式網址（以 <code>/exec</code> 結尾）：
-      </p>
-      <textarea id="apiEndpointInput" rows="3" placeholder="https://script.google.com/macros/s/.../exec"
-        class="w-full p-2.5 text-xs font-mono bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500"></textarea>
-      <div class="flex gap-2 justify-end">
-        <button onclick="closeApiModal()" class="px-4 py-2 text-sm text-slate-600 font-medium">取消</button>
-        <button onclick="saveApiEndpoint()" class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">儲存綁定</button>
+  <!-- Stock Balance Query Card -->
+  <div class="card card-custom mb-3">
+    <div class="card-header-custom">
+      <span><i class="bi bi-stack me-2 text-info"></i>貨架結存快速查詢</span>
+      <button class="btn btn-sm btn-link text-decoration-none p-0" onclick="refreshSkuList()">
+        <i class="bi bi-arrow-clockwise"></i> 重新抓取
+      </button>
+    </div>
+    <div class="card-body p-3" id="stockResultArea">
+      <div class="text-muted small text-center py-2">
+        輸入料號後點擊搜尋，即可查詢「貨架[報表]」之即時結存。
       </div>
     </div>
   </div>
 
-  <!-- Toast 訊息提示 -->
-  <div id="toast" class="fixed bottom-6 inset-x-0 flex justify-center z-50 pointer-events-none transition-all duration-300 opacity-0 translate-y-4">
-    <div id="toastContent" class="bg-slate-900 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2">
-      <i id="toastIcon" data-lucide="info" class="w-4 h-4"></i>
-      <span id="toastMsg">訊息內容</span>
+  <!-- Recent Submissions Card -->
+  <div class="card card-custom">
+    <div class="card-header-custom">
+      <span><i class="bi bi-clock-history me-2 text-secondary"></i>近期 15 筆記錄</span>
+      <button class="btn btn-sm btn-link text-decoration-none p-0" onclick="loadRecentRecords()">
+        <i class="bi bi-arrow-clockwise"></i> 整理
+      </button>
+    </div>
+    <div id="recentList" class="p-0">
+      <div class="p-3 text-center text-muted small">載入近期記錄中...</div>
     </div>
   </div>
+</div>
 
-  <script>
-    let currentMode = '1 In';
-    let currentScanTarget = 'sku';
-    let html5QrCode = null;
-    let cameraList = [];
-    let currentCameraIndex = 0;
-    let activeItemList = [];
-    let whoList = [];
-    let recentRecordsCache = [];
-
-    let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
-
-    lucide.createIcons();
-
-    // 通用 JSONP 呼叫函式 (保證不受 CORS / 302 重新導向阻擋)
-    function jsonpCall(url, params = {}) {
-      return new Promise((resolve, reject) => {
-        const callbackName = 'thg_cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-        const script = document.createElement('script');
-        
-        const cleanup = () => {
-          delete window[callbackName];
-          if (script.parentNode) script.parentNode.removeChild(script);
-        };
-
-        window[callbackName] = (data) => {
-          cleanup();
-          resolve(data);
-        };
-
-        script.onerror = () => {
-          cleanup();
-          reject(new Error('網路傳輸失敗或服務器無回應'));
-        };
-
-        const allParams = { ...params, callback: callbackName };
-        const qs = new URLSearchParams(allParams).toString();
-        const delimiter = url.includes('?') ? '&' : '?';
-        script.src = `${url}${delimiter}${qs}`;
-        document.body.appendChild(script);
-
-        setTimeout(() => {
-          if (window[callbackName]) {
-            cleanup();
-            reject(new Error('連線逾時 (Apps Script 回應時間過長)'));
-          }
-        }, 25000);
-      });
-    }
-
-    // DOM 節點
-    const modeInBtn = document.getElementById('modeIn');
-    const modeOutBtn = document.getElementById('modeOut');
-    const btnSubmit = document.getElementById('btnSubmit');
-    const btnSubmitText = document.getElementById('btnSubmitText');
-    const inputSku = document.getElementById('inputSku');
-    const btnClearSku = document.getElementById('btnClearSku');
-    const skuSuggestions = document.getElementById('skuSuggestions');
-    const skuSourceHint = document.getElementById('skuSourceHint');
-    const btnSyncSkus = document.getElementById('btnSyncSkus');
-    const inputLocation = document.getElementById('inputLocation');
-    const btnClearLoc = document.getElementById('btnClearLoc');
-    const inputQty = document.getElementById('inputQty');
-    const selectWho = document.getElementById('selectWho');
-    const btnSyncWhoManual = document.getElementById('btnSyncWhoManual');
-    const inputNote = document.getElementById('inputNote');
-    const btnScanSku = document.getElementById('btnScanSku');
-    const btnScanLoc = document.getElementById('btnScanLoc');
-    const scannerModal = document.getElementById('scannerModal');
-    const btnCloseScanner = document.getElementById('btnCloseScanner');
-    const scannerTitle = document.getElementById('scannerTitle');
-    const btnSwitchCamera = document.getElementById('btnSwitchCamera');
-    const btnDirectCapture = document.getElementById('btnDirectCapture');
-    const fallbackFileInput = document.getElementById('fallbackFileInput');
-    const cameraLoading = document.getElementById('cameraLoading');
-    const laserLine = document.getElementById('laserLine');
-    const stockNotice = document.getElementById('stockNotice');
-    const stockNoticeContent = document.getElementById('stockNoticeContent');
-    const recordList = document.getElementById('recordList');
-    const recordCount = document.getElementById('recordCount');
-    const btnRefresh = document.getElementById('btnRefresh');
-    const btnReloadRecords = document.getElementById('btnReloadRecords');
-    const apiConfigAlert = document.getElementById('apiConfigAlert');
-    const apiModal = document.getElementById('apiModal');
-    const apiEndpointInput = document.getElementById('apiEndpointInput');
-
-    const editModal = document.getElementById('editModal');
-    const editRowBadge = document.getElementById('editRowBadge');
-    const editRowIndex = document.getElementById('editRowIndex');
-    const editDate = document.getElementById('editDate');
-    const editSku = document.getElementById('editSku');
-    const editLocation = document.getElementById('editLocation');
-    const editQty = document.getElementById('editQty');
-    const editType = document.getElementById('editType');
-    const editSelectWho = document.getElementById('editSelectWho');
-    const editNote = document.getElementById('editNote');
-    const btnDeleteRecord = document.getElementById('btnDeleteRecord');
-    const btnSaveEdit = document.getElementById('btnSaveEdit');
-
-    if (!API_ENDPOINT) {
-      apiConfigAlert.classList.remove('hidden');
-    }
-
-    function openApiModal() {
-      apiEndpointInput.value = API_ENDPOINT;
-      apiModal.classList.remove('hidden');
-    }
-
-    function closeApiModal() {
-      apiModal.classList.add('hidden');
-    }
-
-    function saveApiEndpoint() {
-      const url = apiEndpointInput.value.trim();
-      if (!url.startsWith('https://script.google.com/')) {
-        alert('請輸入正確的 Google Apps Script 網址 (開頭為 https://script.google.com/)');
-        return;
-      }
-      API_ENDPOINT = url;
-      localStorage.setItem('thg_inv_api_endpoint', url);
-      apiConfigAlert.classList.add('hidden');
-      closeApiModal();
-      showToast('API 綁定成功！', 'success');
-      loadActiveItems(true);
-      loadWhoList(true);
-      loadRecentRecords();
-    }
-
-    document.getElementById('btnSettings').addEventListener('click', openApiModal);
-
-    selectWho.addEventListener('change', () => {
-      if (selectWho.value) {
-        localStorage.setItem('thg_inv_last_who', selectWho.value);
-      }
-    });
-
-    modeInBtn.addEventListener('click', () => setMode('1 In'));
-    modeOutBtn.addEventListener('click', () => setMode('3 Out'));
-
-    function setMode(mode) {
-      currentMode = mode;
-      if (mode === '1 In') {
-        modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm";
-        modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
-        btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition";
-        btnSubmitText.textContent = "確認 1 In (進庫) 送出";
-      } else {
-        modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-rose-600 text-white shadow-sm";
-        modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
-        btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-rose-600 hover:bg-rose-700 shadow-md active:scale-98 transition";
-        btnSubmitText.textContent = "確認 3 Out (出庫扣帳)";
-      }
-      lucide.createIcons();
-    }
-
-    document.getElementById('btnQtyMinus').addEventListener('click', () => {
-      let val = parseInt(inputQty.value) || 1;
-      if (val > 1) inputQty.value = val - 1;
-    });
-    document.getElementById('btnQtyPlus').addEventListener('click', () => {
-      let val = parseInt(inputQty.value) || 0;
-      inputQty.value = val + 1;
-    });
-
-    inputSku.addEventListener('input', () => {
-      btnClearSku.classList.toggle('hidden', !inputSku.value);
-      handleSkuAutoComplete(inputSku.value);
-    });
-    btnClearSku.addEventListener('click', () => {
-      inputSku.value = '';
-      btnClearSku.classList.add('hidden');
-      skuSuggestions.classList.add('hidden');
-      stockNotice.classList.add('hidden');
-    });
-
-    inputLocation.addEventListener('input', () => {
-      btnClearLoc.classList.toggle('hidden', !inputLocation.value);
-    });
-    btnClearLoc.addEventListener('click', () => {
-      inputLocation.value = '';
-      btnClearLoc.classList.add('hidden');
-    });
-
-    const LOCAL_ITEMS_KEY = 'thg_cached_active_items';
-    const LOCAL_ITEMS_TIME_KEY = 'thg_cached_active_items_time';
-    const LOCAL_WHO_KEY = 'thg_cached_who_list';
-
-    function initFromLocal() {
-      const cachedItems = localStorage.getItem(LOCAL_ITEMS_KEY);
-      if (cachedItems) {
-        try {
-          activeItemList = JSON.parse(cachedItems);
-          skuSourceHint.textContent = `已快取 ${activeItemList.length} 種品項`;
-          skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
-        } catch (e) {}
-      }
-      const cachedWho = localStorage.getItem(LOCAL_WHO_KEY);
-      if (cachedWho) {
-        try {
-          whoList = JSON.parse(cachedWho);
-          if (whoList && whoList.length > 0) renderWhoDropdown(whoList);
-        } catch (e) {}
-      }
-    }
-
-    async function loadActiveItems(force = false) {
-      if (!API_ENDPOINT) return;
-      const lastSync = parseInt(localStorage.getItem(LOCAL_ITEMS_TIME_KEY) || '0');
-      const now = Date.now();
-      if (!force && activeItemList.length > 0 && (now - lastSync < 3600000)) return;
-
-      skuSourceHint.textContent = `同步在庫料號中...`;
-      try {
-        const data = await jsonpCall(API_ENDPOINT, { action: 'getActiveItems', force: force ? '1' : '0' });
-        if (data.success && data.items) {
-          activeItemList = data.items;
-          localStorage.setItem(LOCAL_ITEMS_KEY, JSON.stringify(activeItemList));
-          localStorage.setItem(LOCAL_ITEMS_TIME_KEY, now.toString());
-          skuSourceHint.textContent = `已同步 ${activeItemList.length} 種在庫料號`;
-          skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
-        }
-      } catch (e) {}
-    }
-
-    async function loadWhoList(force = false) {
-      if (!API_ENDPOINT) {
-        selectWho.innerHTML = `<option value="">請先設定 Apps Script 網址</option>`;
-        return;
-      }
-
-      if (whoList.length === 0) {
-        selectWho.innerHTML = `<option value="">連線載入人員中...</option>`;
-      }
-
-      try {
-        const data = await jsonpCall(API_ENDPOINT, { action: 'getWhoList', force: force ? '1' : '0' });
-        if (data.success) {
-          if (data.list && data.list.length > 0) {
-            whoList = data.list;
-            localStorage.setItem(LOCAL_WHO_KEY, JSON.stringify(whoList));
-            renderWhoDropdown(whoList);
-            if (force) showToast(`已載入 ${whoList.length} 位人員`, 'success');
-          } else {
-            selectWho.innerHTML = `<option value="">List 分頁 C 欄無資料</option>`;
-            showToast("List 分頁 C 欄為空白", "info");
-          }
-        } else {
-          selectWho.innerHTML = `<option value="">載入失敗</option>`;
-          showToast(data.error || "無法讀取 List 分頁", "error");
-        }
-      } catch (err) {
-        if (whoList.length === 0) {
-          selectWho.innerHTML = `<option value="">連線逾時 (請點重整名單)</option>`;
-        }
-      }
-    }
-
-    function renderWhoDropdown(list) {
-      const savedWho = localStorage.getItem('thg_inv_last_who') || '';
-      let optionsHtml = `<option value="" disabled ${!savedWho ? 'selected' : ''}>請選擇 Who (經辦人)</option>`;
-      optionsHtml += list.map(name => `<option value="${name}" ${name === savedWho ? 'selected' : ''}>${name}</option>`).join('');
-
-      selectWho.innerHTML = optionsHtml;
-      editSelectWho.innerHTML = list.map(name => `<option value="${name}">${name}</option>`).join('');
-      lucide.createIcons();
-    }
-
-    btnSyncSkus.addEventListener('click', () => {
-      loadActiveItems(true);
-      loadWhoList(true);
-    });
-
-    btnSyncWhoManual.addEventListener('click', () => {
-      loadWhoList(true);
-    });
-
-    function handleSkuAutoComplete(query) {
-      query = query.trim().toLowerCase();
-      if (!query || activeItemList.length === 0) {
-        skuSuggestions.classList.add('hidden');
-        return;
-      }
-
-      const matches = activeItemList
-        .filter(item => item.toLowerCase().includes(query))
-        .slice(0, 15);
-
-      if (matches.length === 0) {
-        skuSuggestions.classList.add('hidden');
-        return;
-      }
-
-      skuSuggestions.innerHTML = matches.map(item => `
-        <div class="px-3.5 py-2.5 hover:bg-indigo-50 cursor-pointer text-sm font-mono text-slate-700 flex items-center justify-between" onclick="selectSku('${item.replace(/'/g, "\\'")}')">
-          <span>${item}</span>
-          <i data-lucide="corner-down-left" class="w-3.5 h-3.5 text-slate-400"></i>
+<!-- Settings Modal -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-sliders me-2"></i>系統連線設定 (API / OAuth)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Spreadsheet ID (預設試算表)</label>
+          <input type="text" class="form-control" id="cfgSheetId" value="1dryNf2mvqdfBiFuztLocqmsxml2PUAqT-W8mVapWHcc">
         </div>
-      `).join('');
-      skuSuggestions.classList.remove('hidden');
-      lucide.createIcons();
+        <div class="mb-3">
+          <label class="form-label">Google API Key (用於快速無需登入讀取)</label>
+          <input type="text" class="form-control" id="cfgApiKey" placeholder="AIzaSy...">
+          <div class="form-text small">在 Google Cloud Console 建立的 API 密鑰，可限制存取 Google Sheets API。</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">OAuth 2.0 Client ID (用於授權直接寫入)</label>
+          <input type="text" class="form-control" id="cfgClientId" placeholder="xxxxx.apps.googleusercontent.com">
+          <div class="form-text small">請確保在 GCP OAuth 憑據設定中，已將 <code>https://biggio.github.io</code> 加入「已授權的 JavaScript 來源」。</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="saveSettings()">儲存設定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Row Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>編輯第 <span id="editRowIndex"></span> 列記錄</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editActualRow">
+        <input type="hidden" id="editDate">
+        <div class="mb-3">
+          <label class="form-label">類型</label>
+          <select class="form-select" id="editType">
+            <option value="入庫">入庫</option>
+            <option value="出庫">出庫</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">料號</label>
+          <input type="text" class="form-control" id="editSku" required>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label">數量</label>
+            <input type="number" class="form-control" id="editQty" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">儲位</label>
+            <input type="text" class="form-control" id="editLoc">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">人員</label>
+          <select class="form-select" id="editWho"></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">備註</label>
+          <input type="text" class="form-control" id="editNote">
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-danger" onclick="deleteRowFromEdit()">
+          <i class="bi bi-trash"></i> 刪除此筆
+        </button>
+        <div>
+          <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-primary" onclick="saveEditedRow()">儲存變更</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="text-center">
+    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+    <div class="mt-3 fw-bold text-dark" id="loadingMessage">處理中...</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // Configuration Keys
+  const STORAGE_KEYS = {
+    SHEET_ID: 'thg_sheet_id',
+    API_KEY: 'thg_api_key',
+    CLIENT_ID: 'thg_client_id',
+    TOKEN: 'thg_access_token',
+    TOKEN_EXPIRY: 'thg_token_expiry',
+    LAST_WHO: 'thg_last_who'
+  };
+
+  const DEFAULT_SPREADSHEET_ID = '1dryNf2mvqdfBiFuztLocqmsxml2PUAqT-W8mVapWHcc';
+
+  let currentToken = null;
+  let tokenClient = null;
+  let cachedSkuReport = []; // Stores { sku, loc, balance } from 貨架[報表]
+  let editModalInstance = null;
+
+  // Initialize
+  window.addEventListener('DOMContentLoaded', () => {
+    editModalInstance = new bootstrap.Modal(document.getElementById('editModal'));
+    loadSettings();
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // Initialize GIS OAuth Client if CLIENT_ID is present
+    initGisClient();
+
+    // Check cached token
+    checkExistingToken();
+
+    // Load Initial Data directly via Sheets API
+    initAppData();
+  });
+
+  function showLoading(msg = '處理中...') {
+    document.getElementById('loadingMessage').innerText = msg;
+    document.getElementById('loadingOverlay').style.display = 'flex';
+  }
+
+  function hideLoading() {
+    document.getElementById('loadingOverlay').style.display = 'none';
+  }
+
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clockBadge').innerText = now.toTimeString().substring(0, 5);
+  }
+
+  // Load Settings from LocalStorage
+  function loadSettings() {
+    const sheetId = localStorage.getItem(STORAGE_KEYS.SHEET_ID) || DEFAULT_SPREADSHEET_ID;
+    const apiKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
+    const clientId = localStorage.getItem(STORAGE_KEYS.CLIENT_ID) || '';
+
+    document.getElementById('cfgSheetId').value = sheetId;
+    document.getElementById('cfgApiKey').value = apiKey;
+    document.getElementById('cfgClientId').value = clientId;
+
+    if (!apiKey && !clientId) {
+      setTimeout(() => {
+        const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+        modal.show();
+      }, 500);
     }
+  }
 
-    window.selectSku = function(sku) {
-      inputSku.value = sku;
-      skuSuggestions.classList.add('hidden');
-      btnClearSku.classList.remove('hidden');
-      fetchStockInfo(sku);
-      if (!inputLocation.value) inputLocation.focus();
-    };
+  function saveSettings() {
+    const sheetId = document.getElementById('cfgSheetId').value.trim();
+    const apiKey = document.getElementById('cfgApiKey').value.trim();
+    const clientId = document.getElementById('cfgClientId').value.trim();
 
-    document.addEventListener('click', (e) => {
-      if (!inputSku.contains(e.target) && !skuSuggestions.contains(e.target)) {
-        skuSuggestions.classList.add('hidden');
-      }
-    });
+    localStorage.setItem(STORAGE_KEYS.SHEET_ID, sheetId || DEFAULT_SPREADSHEET_ID);
+    localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
+    localStorage.setItem(STORAGE_KEYS.CLIENT_ID, clientId);
 
-    btnScanSku.addEventListener('click', () => startScanner('sku', '掃描料號 QR Code'));
-    btnScanLoc.addEventListener('click', () => startScanner('location', '掃描儲位 QR Code'));
-    btnCloseScanner.addEventListener('click', stopScanner);
+    const modalEl = document.getElementById('settingsModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) modal.hide();
 
-    async function startScanner(target, title) {
-      currentScanTarget = target;
-      scannerTitle.textContent = title;
-      scannerModal.classList.remove('hidden');
-      cameraLoading.classList.remove('hidden');
-      laserLine.classList.add('hidden');
+    initGisClient();
+    initAppData();
+    alert('設定已儲存！');
+  }
 
-      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+  function getSheetId() {
+    return localStorage.getItem(STORAGE_KEYS.SHEET_ID) || DEFAULT_SPREADSHEET_ID;
+  }
 
+  function getApiKey() {
+    return localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
+  }
+
+  function getClientId() {
+    return localStorage.getItem(STORAGE_KEYS.CLIENT_ID) || '';
+  }
+
+  // --- GIS OAuth 2.0 Handling ---
+  function initGisClient() {
+    const clientId = getClientId();
+    if (!clientId) return;
+
+    if (window.google && google.accounts && google.accounts.oauth2) {
       try {
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          cameraList = devices;
-          let backIdx = devices.findIndex(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('rear') || c.label.toLowerCase().includes('0'));
-          if (backIdx === -1) backIdx = devices.length - 1;
-          currentCameraIndex = backIdx;
-          launchWithId(cameraList[currentCameraIndex].id);
-        } else {
-          launchFacingMode();
-        }
-      } catch (e) {
-        launchFacingMode();
-      }
-    }
-
-    function launchWithId(cameraId) {
-      const config = { fps: 20, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
-      html5QrCode.start(cameraId, config, onScanSuccess)
-        .then(() => {
-          cameraLoading.classList.add('hidden');
-          laserLine.classList.remove('hidden');
-        })
-        .catch(() => launchFacingMode());
-    }
-
-    function launchFacingMode() {
-      const config = { fps: 20, qrbox: { width: 250, height: 250 } };
-      html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-        .then(() => {
-          cameraLoading.classList.add('hidden');
-          laserLine.classList.remove('hidden');
-        })
-        .catch(() => {
-          cameraLoading.classList.add('hidden');
-          showToast('無法啟用視訊串流，請改用拍照掃碼', 'error');
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'https://www.googleapis.com/auth/spreadsheets',
+          callback: (tokenResponse) => {
+            if (tokenResponse && tokenResponse.access_token) {
+              currentToken = tokenResponse.access_token;
+              const expiryTime = Date.now() + ((tokenResponse.expires_in || 3600) * 1000);
+              localStorage.setItem(STORAGE_KEYS.TOKEN, currentToken);
+              localStorage.setItem(STORAGE_KEYS.TOKEN_EXPIRY, expiryTime);
+              updateAuthUI(true);
+            }
+          },
         });
-    }
-
-    function stopScanner() {
-      if (html5QrCode && html5QrCode.isScanning) {
-        html5QrCode.stop().then(() => {
-          scannerModal.classList.add('hidden');
-        }).catch(() => {
-          scannerModal.classList.add('hidden');
-        });
-      } else {
-        scannerModal.classList.add('hidden');
+      } catch (err) {
+        console.error('Failed to init GIS Token Client:', err);
       }
+    } else {
+      setTimeout(initGisClient, 500);
+    }
+  }
+
+  function checkExistingToken() {
+    const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+    const expiry = localStorage.getItem(STORAGE_KEYS.TOKEN_EXPIRY);
+    if (token && expiry && Date.now() < parseInt(expiry)) {
+      currentToken = token;
+      updateAuthUI(true);
+    } else {
+      currentToken = null;
+      updateAuthUI(false);
+    }
+  }
+
+  function handleAuthClick() {
+    if (currentToken) {
+      if (confirm('是否確認登出？登出後將無法寫入單據。')) {
+        currentToken = null;
+        localStorage.removeItem(STORAGE_KEYS.TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.TOKEN_EXPIRY);
+        updateAuthUI(false);
+      }
+      return;
     }
 
-    btnSwitchCamera.addEventListener('click', () => {
-      if (cameraList.length > 1) {
-        currentCameraIndex = (currentCameraIndex + 1) % cameraList.length;
-        if (html5QrCode && html5QrCode.isScanning) {
-          html5QrCode.stop().then(() => {
-            cameraLoading.classList.remove('hidden');
-            laserLine.classList.add('hidden');
-            launchWithId(cameraList[currentCameraIndex].id);
-          });
+    if (!getClientId()) {
+      alert('請先在右上角齒輪設定 OAuth Client ID');
+      const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+      modal.show();
+      return;
+    }
+
+    if (!tokenClient) {
+      initGisClient();
+    }
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+      alert('Google 授權組件載入中，請稍候再試...');
+    }
+  }
+
+  function updateAuthUI(isLoggedIn) {
+    const authBtn = document.getElementById('authBtn');
+    const authNotice = document.getElementById('authNotice');
+    const authStatusText = document.getElementById('authStatusText');
+
+    if (isLoggedIn) {
+      authBtn.innerHTML = '<i class="bi bi-check-circle-fill me-1 text-success"></i>已登入';
+      authBtn.className = 'btn btn-sm btn-light fw-bold text-success';
+      authNotice.className = 'auth-banner d-flex justify-content-between align-items-center bg-success-subtle border-success';
+      authStatusText.innerHTML = '<i class="bi bi-shield-check text-success me-1"></i>已成功登入 Google 帳號，具備即時讀取與寫入權限。';
+    } else {
+      authBtn.innerHTML = '<i class="bi bi-google me-1"></i>登入';
+      authBtn.className = 'btn btn-sm btn-light fw-bold text-primary';
+      authNotice.className = 'auth-banner d-flex justify-content-between align-items-center bg-info-subtle border-info';
+      authStatusText.innerHTML = '<i class="bi bi-info-circle-fill text-primary me-1"></i>唯讀模式：可快速查詢。送出入庫/出庫記錄請先點擊右上角「登入」。';
+    }
+  }
+
+  // Helper: Sheets API Headers & Auth
+  function getRequestHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentToken) {
+      headers['Authorization'] = 'Bearer ' + currentToken;
+    }
+    return headers;
+  }
+
+  // --- Direct Sheets API v4 Calls ---
+  async function apiGetValues(range) {
+    const sheetId = getSheetId();
+    const apiKey = getApiKey();
+    let url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(range);
+    if (apiKey) {
+      url += '?key=' + apiKey;
+    }
+
+    const headers = getRequestHeaders();
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    return data.values || [];
+  }
+
+  async function apiAppendValues(range, values) {
+    const sheetId = getSheetId();
+    if (!currentToken) {
+      throw new Error('未登入！請先點擊右上角「登入」以獲得寫入權限。');
+    }
+    const url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(range) + ':append?valueInputOption=USER_ENTERED';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ values: [values] })
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || ('HTTP ' + res.status));
+    }
+    return await res.json();
+  }
+
+  async function apiUpdateValues(range, values) {
+    const sheetId = getSheetId();
+    if (!currentToken) {
+      throw new Error('未登入！請先點擊右上角「登入」以獲得寫入權限。');
+    }
+    const url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(range) + '?valueInputOption=USER_ENTERED';
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ values: [values] })
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || ('HTTP ' + res.status));
+    }
+    return await res.json();
+  }
+
+  async function apiClearValues(range) {
+    const sheetId = getSheetId();
+    if (!currentToken) {
+      throw new Error('未登入！請先點擊右上角「登入」以獲得寫入權限。');
+    }
+    const url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(range) + ':clear';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({})
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error?.message || ('HTTP ' + res.status));
+    }
+    return await res.json();
+  }
+
+  // --- Data Initialization ---
+  async function initAppData() {
+    showLoading('正在自 Google Sheets 讀取基礎資料...');
+    try {
+      await Promise.allSettled([
+        loadWhoList(),
+        refreshSkuList(),
+        loadRecentRecords()
+      ]);
+    } catch (err) {
+      console.error('Init error:', err);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // 1. Load Who List from List!C2:C100
+  async function loadWhoList() {
+    const whoSelect = document.getElementById('whoSelect');
+    const editWho = document.getElementById('editWho');
+    try {
+      const rows = await apiGetValues("'List'!C2:C100");
+      whoSelect.innerHTML = '<option value="">請選擇作業人員...</option>';
+      editWho.innerHTML = '<option value="">請選擇人員...</option>';
+
+      const lastWho = localStorage.getItem(STORAGE_KEYS.LAST_WHO) || '';
+      rows.forEach(r => {
+        if (r && r[0] && r[0].toString().trim()) {
+          const name = r[0].toString().trim();
+          const opt = new Option(name, name);
+          if (name === lastWho) opt.selected = true;
+          whoSelect.add(opt);
+
+          const optEdit = new Option(name, name);
+          editWho.add(optEdit);
         }
-      } else {
-        showToast("未偵測到其他鏡頭", "info");
-      }
-    });
-
-    btnDirectCapture.addEventListener('click', () => fallbackFileInput.click());
-    fallbackFileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      showToast("正在解析照片條碼...", "info");
-      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
-
-      html5QrCode.scanFile(file, true)
-        .then(decodedText => onScanSuccess(decodedText))
-        .catch(() => showToast("未能辨識照片中的 QR Code，請確認條碼清晰再試", "error"));
-    });
-
-    function onScanSuccess(decodedText) {
-      if (navigator.vibrate) navigator.vibrate(100);
-      stopScanner();
-
-      const val = decodedText.trim();
-      if (currentScanTarget === 'sku') {
-        inputSku.value = val;
-        btnClearSku.classList.remove('hidden');
-        showToast(`已讀取料號: ${val}`, "success");
-        fetchStockInfo(val);
-        if (!inputLocation.value) {
-          setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
-        }
-      } else if (currentScanTarget === 'location') {
-        inputLocation.value = val;
-        btnClearLoc.classList.remove('hidden');
-        showToast(`已讀取儲位: ${val}`, "success");
-        inputQty.focus();
-      }
+      });
+    } catch (err) {
+      console.error('Failed to load Who:', err);
+      whoSelect.innerHTML = '<option value="">載入失敗 (請確認 API Key / 權限)</option>';
     }
+  }
 
-    inputSku.addEventListener('change', () => {
-      if (inputSku.value.trim()) fetchStockInfo(inputSku.value.trim());
-    });
+  // 2. Refresh SKU List & Balances from 貨架[報表]!A2:G
+  async function refreshSkuList() {
+    try {
+      const rows = await apiGetValues("'貨架[報表]'!A2:G");
+      const datalist = document.getElementById('skuDatalist');
+      datalist.innerHTML = '';
+      cachedSkuReport = [];
 
-    // 透過 JSONP 查詢結存庫存 (貨架[報表])
-    async function fetchStockInfo(sku) {
-      if (!API_ENDPOINT) return;
-      stockNotice.classList.remove('hidden');
-      stockNoticeContent.innerHTML = `<span class="animate-pulse">查詢【${sku}】報表結存中...</span>`;
+      const skuSet = new Set();
 
-      try {
-        const data = await jsonpCall(API_ENDPOINT, { action: 'queryStock', sku: sku });
-        if (data.success) {
-          const keys = Object.keys(data.stockMap);
-          if (keys.length === 0) {
-            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 目前報表中無結存數據。`;
-          } else {
-            let details = keys.map(k => `${k}: <b>${data.stockMap[k]}</b>`).join('，');
-            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 總結存: <span class="font-bold text-emerald-600 text-base">${data.total}</span> (分佈: ${details})`;
+      rows.forEach(r => {
+        if (!r || r.length === 0) return;
+        const colA = (r[0] || '').toString().trim();
+        const colB = (r[1] || '').toString().trim();
+        const balance = (r[6] || r[5] || r[2] || '').toString().trim();
+
+        // SKU can be in B or A depending on report layout
+        let sku = colB || colA;
+        let loc = (colA !== sku) ? colA : '';
+        if (colA && colB && colB.length > colA.length) {
+          sku = colB;
+          loc = colA;
+        }
+
+        if (sku) {
+          cachedSkuReport.push({ sku, loc, balance, raw: r });
+          if (!skuSet.has(sku)) {
+            skuSet.add(sku);
+            const opt = document.createElement('option');
+            opt.value = sku;
+            datalist.appendChild(opt);
           }
-        } else {
-          stockNoticeContent.innerHTML = `查詢未成功: ${data.error || '無資料'}`;
         }
-      } catch (err) {
-        stockNoticeContent.innerHTML = `查詢失敗: ${err.message || err}`;
+      });
+      console.log('Loaded ' + skuSet.size + ' unique SKUs from 貨架[報表]');
+    } catch (err) {
+      console.error('Failed to refresh SKU report:', err);
+    }
+  }
+
+  // Handle SKU Changed (Auto fill location & show balance if found)
+  function onSkuChanged() {
+    const val = document.getElementById('skuInput').value.trim();
+    if (!val) {
+      document.getElementById('stockInquiry').innerText = '';
+      return;
+    }
+    const match = cachedSkuReport.find(item => item.sku.toLowerCase() === val.toLowerCase());
+    if (match) {
+      if (match.loc && !document.getElementById('locInput').value) {
+        document.getElementById('locInput').value = match.loc;
+      }
+      if (match.balance) {
+        document.getElementById('stockInquiry').innerHTML = '<span class="badge bg-info-subtle text-info-emphasis">結存: ' + match.balance + '</span>';
       }
     }
+  }
 
-    // 表單提交：使用 JSONP 確保收到後端明確的「寫入成功」確認
-    document.getElementById('stockForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      if (!API_ENDPOINT) {
-        openApiModal();
-        return;
-      }
-
-      const sku = inputSku.value.trim();
-      const location = inputLocation.value.trim();
-      const qty = parseInt(inputQty.value) || 0;
-      const operator = selectWho.value.trim();
-      const note = inputNote.value.trim();
-
-      if (!sku || !location || qty <= 0 || !operator) {
-        showToast("請完整填寫料號、儲位、數量與 Who (經辦人)", "error");
-        return;
-      }
-
-      btnSubmit.disabled = true;
-      btnSubmit.classList.add('opacity-70');
-      btnSubmitText.textContent = "寫入試算表中...";
-
-      const postData = {
-        action: 'submit',
-        sku: sku,
-        qty: qty,
-        location: location,
-        type: currentMode,
-        operator: operator,
-        note: note
-      };
-
-      try {
-        const res = await jsonpCall(API_ENDPOINT, postData);
-        btnSubmit.disabled = false;
-        btnSubmit.classList.remove('opacity-70');
-        btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
-
-        if (res.success) {
-          showToast(`已成功寫入！${sku} (${currentMode} ${qty})`, "success");
-          inputSku.value = "";
-          btnClearSku.classList.add('hidden');
-          inputLocation.value = "";
-          btnClearLoc.classList.add('hidden');
-          inputQty.value = "1";
-          inputNote.value = "";
-          stockNotice.classList.add('hidden');
-          loadRecentRecords();
-        } else {
-          showToast("寫入失敗: " + (res.error || '未知錯誤'), "error");
-        }
-      } catch (err) {
-        btnSubmit.disabled = false;
-        btnSubmit.classList.remove('opacity-70');
-        btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
-        showToast("送出失敗: " + (err.message || err), "error");
-      }
-    });
-
-    // 抓取近期記錄
-    async function loadRecentRecords() {
-      if (!API_ENDPOINT) {
-        recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先綁定 Apps Script 網址</div>`;
-        recordCount.textContent = "";
-        return;
-      }
-
-      recordCount.textContent = "載入中...";
-      try {
-        const data = await jsonpCall(API_ENDPOINT, { action: 'getRecords' });
-        if (data.success && data.records) {
-          recentRecordsCache = data.records;
-          renderRecords(data.records);
-        } else {
-          recordList.innerHTML = `<div class="text-rose-500 text-xs py-2 text-center">載入失敗: ${data.error || '未知錯誤'}</div>`;
-          recordCount.textContent = "";
-        }
-      } catch (err) {
-        recordList.innerHTML = `<div class="text-rose-500 text-xs py-2 text-center">連線逾時 (${err.message})<br><button onclick="loadRecentRecords()" class="mt-1 text-indigo-600 underline font-medium">點此重試</button></div>`;
-        recordCount.textContent = "";
-      }
+  function queryCurrentStock() {
+    const sku = document.getElementById('skuInput').value.trim();
+    const resultArea = document.getElementById('stockResultArea');
+    if (!sku) {
+      resultArea.innerHTML = '<div class="alert alert-warning py-2 small mb-0">請先輸入料號！</div>';
+      return;
     }
 
-    function renderRecords(records) {
-      recordCount.textContent = `共 ${records.length} 筆`;
-      if (records.length === 0) {
-        recordList.innerHTML = `<div class="text-slate-400 text-sm py-3 text-center">目前尚無記錄</div>`;
+    const matches = cachedSkuReport.filter(item => item.sku.toLowerCase().includes(sku.toLowerCase()));
+    if (matches.length === 0) {
+      resultArea.innerHTML = '<div class="alert alert-secondary py-2 small mb-0">未在貨架[報表]中找到料號包含 "' + sku + '" 的現存記錄。</div>';
+    } else {
+      let html = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-0">';
+      html += '<thead class="table-light"><tr><th>料號</th><th>儲位</th><th>現存量</th></tr></thead><tbody>';
+      matches.slice(0, 5).forEach(m => {
+        html += '<tr><td><strong>' + m.sku + '</strong></td><td>' + (m.loc || '-') + '</td><td class="fw-bold text-primary">' + (m.balance || '-') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      if (matches.length > 5) {
+        html += '<small class="text-muted mt-1 d-block">僅顯示前 5 筆結果 (共 ' + matches.length + ' 筆)</small>';
+      }
+      resultArea.innerHTML = html;
+    }
+  }
+
+  function handleTypeChange() {
+    const isOut = document.getElementById('typeOut').checked;
+    const submitBtn = document.getElementById('submitBtn');
+    if (isOut) {
+      submitBtn.className = 'btn btn-danger btn-submit w-100 mt-2';
+      submitBtn.innerHTML = '<i class="bi bi-box-arrow-up me-2"></i>確認出庫';
+    } else {
+      submitBtn.className = 'btn btn-primary btn-submit w-100 mt-2';
+      submitBtn.innerHTML = '<i class="bi bi-box-arrow-in-down me-2"></i>確認入庫';
+    }
+  }
+
+  // 3. Submit New Record to 貨架[填單]
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    if (!currentToken) {
+      alert('請先點擊右上角「登入」以獲得寫入權限！');
+      handleAuthClick();
+      return;
+    }
+
+    const type = document.querySelector('input[name="typeOption"]:checked').value;
+    const sku = document.getElementById('skuInput').value.trim();
+    const qty = document.getElementById('qtyInput').value.trim();
+    const loc = document.getElementById('locInput').value.trim();
+    const who = document.getElementById('whoSelect').value;
+    const note = document.getElementById('noteInput').value.trim();
+
+    if (!sku || !qty || !who) {
+      alert('請填寫完整必要欄位 (料號、數量、人員)！');
+      return;
+    }
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = now.getFullYear() + '/' + pad(now.getMonth()+1) + '/' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+
+    // Target columns: A=Date, B=SKU, C=Qty, D=Loc, E=Type, F=Who, G=Note
+    const rowValues = [dateStr, sku, qty, loc, type, who, note];
+
+    showLoading('正在送出單據至 Google Sheets...');
+    try {
+      await apiAppendValues("'貨架[填單]'!A:G", rowValues);
+      
+      // Save last who
+      localStorage.setItem(STORAGE_KEYS.LAST_WHO, who);
+
+      // Reset form
+      document.getElementById('skuInput').value = '';
+      document.getElementById('qtyInput').value = '';
+      document.getElementById('locInput').value = '';
+      document.getElementById('noteInput').value = '';
+      document.getElementById('stockInquiry').innerText = '';
+
+      // Reload recent records
+      await loadRecentRecords();
+      alert('單據送出成功！');
+    } catch (err) {
+      alert('送出失敗: ' + err.message);
+      console.error(err);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // 4. Load Recent Records from 貨架[填單]!A:G
+  async function loadRecentRecords() {
+    const listEl = document.getElementById('recentList');
+    listEl.innerHTML = '<div class="p-3 text-center text-muted small"><div class="spinner-border spinner-border-sm text-primary me-2"></div>正在讀取最新單據...</div>';
+
+    try {
+      const rows = await apiGetValues("'貨架[填單]'!A2:G");
+      if (rows.length === 0) {
+        listEl.innerHTML = '<div class="p-3 text-center text-muted small">目前尚無記錄。</div>';
         return;
       }
 
-      recordList.innerHTML = records.map((r, idx) => {
-        const isOut = r.type === '3 Out' || r.type === '出' || r.type === '出庫';
-        const badgeColor = isOut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
-        const qtyPrefix = isOut ? '-' : '+';
-        return `
-          <div class="p-2.5 bg-slate-50 hover:bg-indigo-50/50 border border-slate-200 rounded-xl flex items-center justify-between text-xs cursor-pointer transition active:scale-[0.99]" onclick="openEditModal(${idx})">
-            <div class="space-y-0.5">
-              <div class="flex items-center space-x-1.5">
-                <span class="px-1.5 py-0.5 rounded font-bold ${badgeColor}">${r.type}</span>
-                <span class="font-bold text-slate-800 text-sm font-mono">${r.sku}</span>
-                <span class="text-[10px] text-slate-400 font-mono">#${r.rowIndex}行</span>
+      // 1-based sheet row = idx + 2
+      const indexedRows = rows.map((r, idx) => ({
+        actualRow: idx + 2,
+        date: r[0] || '',
+        sku: r[1] || '',
+        qty: r[2] || '',
+        loc: r[3] || '',
+        type: r[4] || '入庫',
+        who: r[5] || '',
+        note: r[6] || ''
+      })).filter(item => item.sku || item.date);
+
+      // Take last 15, reverse order
+      const recent = indexedRows.slice(-15).reverse();
+
+      let html = '';
+      recent.forEach(item => {
+        const isOut = item.type === '出庫';
+        const badgeClass = isOut ? 'badge-out' : 'badge-in';
+
+        html += `
+          <div class="recent-item">
+            <div style="flex: 1; min-width: 0;" class="me-2">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="badge status-badge ${badgeClass}">${item.type}</span>
+                <strong class="text-truncate" style="font-size: 1rem;">${item.sku}</strong>
+                <span class="fw-bold ${isOut ? 'text-danger' : 'text-success'}">${item.qty}</span>
               </div>
-              <div class="text-slate-500 flex items-center space-x-2">
-                <span>儲位: <b class="text-slate-700">${r.location}</b></span>
-                <span>Who: <b class="text-slate-700">${r.operator || '-'}</b></span>
+              <div class="text-muted small d-flex flex-wrap gap-2">
+                <span><i class="bi bi-geo-alt"></i> ${item.loc || '無儲位'}</span>
+                <span><i class="bi bi-person"></i> ${item.who || '未知'}</span>
+                <span><i class="bi bi-clock"></i> ${item.date}</span>
+                ${item.note ? `<span><i class="bi bi-chat-dots"></i> ${item.note}</span>` : ''}
               </div>
-              <div class="text-slate-400 text-[10px]">${r.date} ${r.note ? `| ${r.note}` : ''}</div>
             </div>
-            <div class="flex items-center space-x-2">
-              <span class="text-base font-bold font-mono ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
-                ${qtyPrefix}${r.qty}
-              </span>
-              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400"></i>
+            <div>
+              <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="openEditModal(${item.actualRow}, '${encodeURIComponent(JSON.stringify(item))}')">
+                <i class="bi bi-pencil"></i>
+              </button>
             </div>
           </div>
         `;
-      }).join('');
-      lucide.createIcons();
+      });
+
+      listEl.innerHTML = html;
+    } catch (err) {
+      console.error('Failed to load recent records:', err);
+      listEl.innerHTML = '<div class="p-3 text-center text-danger small">載入失敗: ' + err.message + '<br>請確認 API Key 與試算表權限。</div>';
+    }
+  }
+
+  // 5. Open Edit Modal
+  function openEditModal(actualRow, itemJsonEncoded) {
+    if (!currentToken) {
+      alert('請先點擊右上角「登入」後再進行修改或刪除操作！');
+      handleAuthClick();
+      return;
     }
 
-    btnReloadRecords.addEventListener('click', loadRecentRecords);
+    const item = JSON.parse(decodeURIComponent(itemJsonEncoded));
+    document.getElementById('editActualRow').value = actualRow;
+    document.getElementById('editRowIndex').innerText = actualRow;
+    document.getElementById('editDate').value = item.date;
+    document.getElementById('editType').value = item.type;
+    document.getElementById('editSku').value = item.sku;
+    document.getElementById('editQty').value = item.qty;
+    document.getElementById('editLoc').value = item.loc;
+    document.getElementById('editWho').value = item.who;
+    document.getElementById('editNote').value = item.note;
 
-    window.openEditModal = function(index) {
-      const record = recentRecordsCache[index];
-      if (!record) return;
+    editModalInstance.show();
+  }
 
-      editRowIndex.value = record.rowIndex;
-      editRowBadge.textContent = `第 ${record.rowIndex} 行`;
-      editDate.value = record.date;
-      editSku.value = record.sku;
-      editLocation.value = record.location;
-      editQty.value = record.qty;
-      editType.value = (record.type === '3 Out' || record.type === '出' || record.type === '出庫') ? '3 Out' : '1 In';
-      editSelectWho.value = record.operator;
-      editNote.value = record.note;
+  // 6. Save Edited Row
+  async function saveEditedRow() {
+    const actualRow = document.getElementById('editActualRow').value;
+    const date = document.getElementById('editDate').value;
+    const type = document.getElementById('editType').value;
+    const sku = document.getElementById('editSku').value.trim();
+    const qty = document.getElementById('editQty').value.trim();
+    const loc = document.getElementById('editLoc').value.trim();
+    const who = document.getElementById('editWho').value;
+    const note = document.getElementById('editNote').value.trim();
 
-      editModal.classList.remove('hidden');
-      lucide.createIcons();
-    };
-
-    window.closeEditModal = function() {
-      editModal.classList.add('hidden');
-    };
-
-    document.getElementById('editForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const rowIndex = editRowIndex.value;
-      if (!rowIndex) return;
-
-      btnSaveEdit.disabled = true;
-      btnSaveEdit.textContent = "更新中...";
-
-      const postData = {
-        action: 'update',
-        rowIndex: rowIndex,
-        date: editDate.value,
-        sku: editSku.value.trim(),
-        location: editLocation.value.trim(),
-        qty: parseInt(editQty.value) || 1,
-        type: editType.value,
-        operator: editSelectWho.value.trim(),
-        note: editNote.value.trim()
-      };
-
-      try {
-        const res = await jsonpCall(API_ENDPOINT, postData);
-        btnSaveEdit.disabled = false;
-        btnSaveEdit.textContent = "儲存更新";
-        if (res.success) {
-          closeEditModal();
-          showToast(`第 ${rowIndex} 行記錄已更新成功！`, 'success');
-          loadRecentRecords();
-        } else {
-          showToast("更新失敗: " + (res.error || ''), 'error');
-        }
-      } catch (err) {
-        btnSaveEdit.disabled = false;
-        btnSaveEdit.textContent = "儲存更新";
-        showToast("連線失敗: " + err.message, 'error');
-      }
-    });
-
-    btnDeleteRecord.addEventListener('click', async () => {
-      const rowIndex = editRowIndex.value;
-      if (!rowIndex) return;
-
-      if (!confirm(`確定要從 Google 試算表刪除第 ${rowIndex} 行嗎？刪除後無法還原。`)) {
-        return;
-      }
-
-      btnDeleteRecord.disabled = true;
-      btnDeleteRecord.textContent = "刪除中...";
-
-      try {
-        const res = await jsonpCall(API_ENDPOINT, { action: 'delete', rowIndex: rowIndex });
-        btnDeleteRecord.disabled = false;
-        btnDeleteRecord.textContent = "刪除整行";
-        if (res.success) {
-          closeEditModal();
-          showToast(`第 ${rowIndex} 行記錄已成功刪除！`, 'success');
-          loadRecentRecords();
-        } else {
-          showToast("刪除失敗: " + (res.error || ''), 'error');
-        }
-      } catch (err) {
-        btnDeleteRecord.disabled = false;
-        btnDeleteRecord.textContent = "刪除整行";
-        showToast("連線失敗: " + err.message, 'error');
-      }
-    });
-
-    btnRefresh.addEventListener('click', () => {
-      loadActiveItems(true);
-      loadWhoList(true);
-      loadRecentRecords();
-    });
-
-    function showToast(msg, type = "info") {
-      const toast = document.getElementById('toast');
-      const toastContent = document.getElementById('toastContent');
-      const toastMsg = document.getElementById('toastMsg');
-      toastMsg.textContent = msg;
-      if (type === 'error') {
-        toastContent.className = "bg-rose-600 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
-      } else if (type === 'success') {
-        toastContent.className = "bg-emerald-600 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
-      } else {
-        toastContent.className = "bg-slate-900 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
-      }
-
-      toast.classList.remove('opacity-0', 'translate-y-4');
-      toast.classList.add('opacity-100', 'translate-y-0');
-
-      setTimeout(() => {
-        toast.classList.remove('opacity-100', 'translate-y-0');
-        toast.classList.add('opacity-0', 'translate-y-4');
-      }, 2500);
+    if (!sku || !qty || !who) {
+      alert('請填寫完整必要欄位 (料號、數量、人員)！');
+      return;
     }
 
-    // 初始化優先順序：
-    // 1. 本地快取秒開 (0 秒)
-    // 2. 優先載入近期記錄 (使用者最關心的資料)
-    // 3. 錯開 1 秒載入人員清單 (若無快取)
-    // 4. 錯開 2 秒載入料號清單 (若無快取)
-    initFromLocal();
-    loadRecentRecords();
-    setTimeout(() => loadWhoList(false), 800);
-    setTimeout(() => loadActiveItems(false), 1600);
-  </script>
+    const rowValues = [date, sku, qty, loc, type, who, note];
+    const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
+
+    showLoading('正在更新第 ' + actualRow + ' 列記錄...');
+    try {
+      await apiUpdateValues(range, rowValues);
+      editModalInstance.hide();
+      await loadRecentRecords();
+      alert('記錄修改成功！');
+    } catch (err) {
+      alert('更新失敗: ' + err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // 7. Delete (Clear) Row
+  async function deleteRowFromEdit() {
+    const actualRow = document.getElementById('editActualRow').value;
+    if (!confirm('確定要刪除試算表中第 ' + actualRow + ' 列的記錄嗎？\n(此操作將會清空該行內容)')) {
+      return;
+    }
+
+    const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
+    showLoading('正在刪除第 ' + actualRow + ' 列記錄...');
+    try {
+      await apiClearValues(range);
+      editModalInstance.hide();
+      await loadRecentRecords();
+      alert('記錄已刪除！');
+    } catch (err) {
+      alert('刪除失敗: ' + err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+</script>
 </body>
 </html>
