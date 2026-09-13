@@ -249,6 +249,49 @@
       opacity: 1;
       transform: translateX(-50%) translateY(10px);
     }
+    /* Mobile-specific ergonomic enhancements */
+    @media (max-width: 576px) {
+      .header-bar {
+        padding: 12px 14px;
+      }
+      .header-bar h5 {
+        font-size: 1.1rem;
+      }
+      .header-bar small {
+        font-size: 0.72rem;
+        flex-wrap: wrap;
+      }
+      .card-custom {
+        border-radius: 12px;
+        margin-bottom: 16px;
+      }
+      .card-header-custom {
+        padding: 10px 14px;
+        font-size: 0.95rem;
+      }
+      .form-control-lg, .form-select-lg {
+        font-size: 1rem;
+        padding: 0.55rem 0.75rem;
+      }
+      .btn-type {
+        height: 44px;
+        font-size: 0.95rem;
+      }
+      .qty-stepper-btn {
+        width: 38px;
+        font-size: 1.15rem;
+      }
+      .recent-item {
+        padding: 10px 14px;
+      }
+      .btn-edit-touch {
+        width: 38px;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
@@ -397,7 +440,7 @@
   <!-- Recent Submissions Card -->
   <div class="card card-custom">
     <div class="card-header-custom">
-      <span><i class="bi bi-clock-history me-2 text-secondary"></i>近期 15 筆記錄</span>
+      <span><i class="bi bi-clock-history me-2 text-secondary"></i>近期 10 筆記錄</span>
       <button class="btn btn-sm btn-link text-decoration-none p-0" onclick="loadRecentRecords()">
         <i class="bi bi-arrow-clockwise"></i> 整理
       </button>
@@ -1491,6 +1534,15 @@
       listEl.innerHTML = '';
     }
     listEl.prepend(div);
+    // Keep max 10 in UI
+    while (listEl.children.length > 10) {
+      listEl.removeChild(listEl.lastChild);
+    }
+    // Also keep cachedRecentList in sync
+    cachedRecentList.unshift(item);
+    if (cachedRecentList.length > 10) {
+      cachedRecentList.pop();
+    }
   }
 
   // Helper to render recent list from cachedRecentList array
@@ -1526,7 +1578,7 @@
           </div>
           <div>
             ${item.actualRow !== '新' ? `
-            <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="openEditModal(${item.actualRow}, '${encodeURIComponent(JSON.stringify(item))}')">
+            <button class="btn btn-sm btn-outline-secondary py-1 px-2 btn-edit-touch" onclick="openEditModal(${item.actualRow}, '${encodeURIComponent(JSON.stringify(item))}')" title="編輯記錄">
               <i class="bi bi-pencil"></i>
             </button>` : ''}
           </div>
@@ -1561,8 +1613,8 @@
         note: r[6] || ''
       })).filter(item => item.sku || item.date);
 
-      // Take last 15, reverse order
-      cachedRecentList = indexedRows.slice(-15).reverse();
+      // Take last 10, reverse order
+      cachedRecentList = indexedRows.slice(-10).reverse();
       renderRecentRecordsUI();
     } catch (err) {
       console.error('Failed to load recent records:', err);
