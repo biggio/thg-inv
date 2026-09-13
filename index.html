@@ -25,6 +25,9 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       padding-bottom: 80px;
     }
+    .uppercase-input {
+      text-transform: uppercase;
+    }
     .header-bar {
       background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
       color: white;
@@ -250,7 +253,7 @@
             <span id="stockInquiry" class="text-muted small fw-normal"></span>
           </label>
           <div class="input-group">
-            <input type="text" class="form-control form-control-lg" id="skuInput" placeholder="輸入料號或掃碼..." required autocomplete="off" oninput="onSkuChanged()">
+            <input type="text" class="form-control form-control-lg uppercase-input" id="skuInput" placeholder="輸入料號或掃碼..." required autocomplete="off" oninput="onSkuChanged()">
             <button class="btn btn-primary px-3" type="button" onclick="startScanner('sku', '掃描料號 QR Code')" title="掃描料號 QR Code">
               <i class="bi bi-qr-code-scan me-1"></i>掃碼
             </button>
@@ -272,7 +275,7 @@
           <div class="col-6">
             <label class="form-label">儲位 (Location)</label>
             <div class="input-group">
-              <input type="text" class="form-control form-control-lg" id="locInput" placeholder="儲位代號" autocomplete="off">
+              <input type="text" class="form-control form-control-lg uppercase-input" id="locInput" placeholder="儲位代號" autocomplete="off">
               <button class="btn btn-outline-secondary" type="button" onclick="startScanner('location', '掃描儲位 QR Code')" title="掃描儲位 QR Code">
                 <i class="bi bi-qr-code"></i>
               </button>
@@ -428,7 +431,7 @@
         </div>
         <div class="mb-3">
           <label class="form-label">料號</label>
-          <input type="text" class="form-control" id="editSku" required>
+          <input type="text" class="form-control uppercase-input" id="editSku" required>
         </div>
         <div class="row g-2 mb-3">
           <div class="col-6">
@@ -437,7 +440,7 @@
           </div>
           <div class="col-6">
             <label class="form-label">儲位</label>
-            <input type="text" class="form-control" id="editLoc">
+            <input type="text" class="form-control uppercase-input" id="editLoc">
           </div>
         </div>
         <div class="mb-3">
@@ -677,23 +680,23 @@
   function onScanSuccess(decodedText) {
     if (scannerCooldown) return;
 
-    let val = decodedText.trim();
+    let val = decodedText.trim().toUpperCase();
     // Support JSON format if QR code is JSON
     if (val.startsWith('{') && val.endsWith('}')) {
       try {
         const parsed = JSON.parse(val);
-        val = parsed.sku || parsed.item || parsed.material || parsed.id || parsed.loc || val;
+        val = (parsed.sku || parsed.item || parsed.material || parsed.id || parsed.loc || val).toString().trim().toUpperCase();
       } catch (e) {}
     }
 
     if (currentScanTarget === 'sku') {
       if (cachedSkuReport.length > 0) {
-        const matched = cachedSkuReport.find(item => item.sku.toLowerCase() === val.toLowerCase());
+        const matched = cachedSkuReport.find(item => item.sku.toUpperCase() === val);
         if (matched) {
           // Valid SKU! Vibrate, close scanner, fill input, fill stock balance and loc
           if (navigator.vibrate) navigator.vibrate(100);
           stopScanner();
-          document.getElementById('skuInput').value = matched.sku;
+          document.getElementById('skuInput').value = matched.sku.toUpperCase();
           onSkuChanged();
           queryCurrentStock();
 
@@ -730,15 +733,15 @@
     } else if (currentScanTarget === 'location') {
       if (validLocations.length > 0) {
         // Check if val matches any valid location (case-insensitive trim match)
-        const matched = validLocations.find(l => l.toLowerCase() === val.toLowerCase());
+        const matched = validLocations.find(l => l.toUpperCase() === val);
         if (matched) {
           // Success! Vibrate, close scanner and populate
           if (navigator.vibrate) navigator.vibrate(100);
           stopScanner();
-          document.getElementById('locInput').value = matched;
+          document.getElementById('locInput').value = matched.toUpperCase();
           const fb = document.getElementById('locFeedback');
           if (fb) {
-            fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>儲位驗證有效：' + matched + '</span>';
+            fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>儲位驗證有效：' + matched.toUpperCase() + '</span>';
           }
         } else {
           // Invalid location: do NOT close camera, alert on HUD, vibrate error, keep camera running!
@@ -1136,9 +1139,9 @@
     }
 
     const type = document.querySelector('input[name="typeOption"]:checked').value;
-    const sku = document.getElementById('skuInput').value.trim();
+    const sku = document.getElementById('skuInput').value.trim().toUpperCase();
     const qty = document.getElementById('qtyInput').value.trim();
-    const loc = document.getElementById('locInput').value.trim();
+    const loc = document.getElementById('locInput').value.trim().toUpperCase();
     const who = document.getElementById('whoSelect').value;
     const note = document.getElementById('noteInput').value.trim();
 
@@ -1355,9 +1358,9 @@
     const actualRow = parseInt(document.getElementById('editActualRow').value, 10);
     const date = document.getElementById('editDate').value;
     const type = document.getElementById('editType').value;
-    const sku = document.getElementById('editSku').value.trim();
+    const sku = document.getElementById('editSku').value.trim().toUpperCase();
     const qty = document.getElementById('editQty').value.trim();
-    const loc = document.getElementById('editLoc').value.trim();
+    const loc = document.getElementById('editLoc').value.trim().toUpperCase();
     const who = document.getElementById('editWho').value;
     const note = document.getElementById('editNote').value.trim();
 
