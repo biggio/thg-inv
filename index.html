@@ -28,6 +28,45 @@
     .uppercase-input {
       text-transform: uppercase;
     }
+    .sku-autocomplete-wrapper {
+      position: relative;
+    }
+    .sku-autocomplete-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 1050;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 4px;
+      display: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sku-autocomplete-item {
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      border-bottom: 1px solid #f1f5f9;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sku-autocomplete-item:last-child {
+      border-bottom: none;
+    }
+    .sku-autocomplete-item:hover, .sku-autocomplete-item:active {
+      background-color: #e0f2fe;
+    }
+    .sku-highlight {
+      font-weight: 700;
+      color: #0284c7;
+      text-decoration: underline;
+    }
     .header-bar {
       background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
       color: white;
@@ -252,14 +291,18 @@
             <span>料號 (SKU) <span class="text-danger">*</span></span>
             <span id="stockInquiry" class="text-muted small fw-normal"></span>
           </label>
-          <div class="input-group">
-            <input type="text" class="form-control form-control-lg uppercase-input" id="skuInput" placeholder="輸入料號或掃碼..." required autocomplete="off" oninput="onSkuChanged()">
-            <button class="btn btn-primary px-3" type="button" onclick="startScanner('sku', '掃描料號 QR Code')" title="掃描料號 QR Code">
-              <i class="bi bi-qr-code-scan me-1"></i>掃碼
-            </button>
-            <button class="btn btn-outline-secondary" type="button" onclick="queryCurrentStock()" title="查詢即時庫存">
-              <i class="bi bi-search"></i>
-            </button>
+          <div class="sku-autocomplete-wrapper">
+            <div class="input-group">
+              <input type="text" class="form-control form-control-lg uppercase-input" id="skuInput" placeholder="輸入料號或掃碼..." required autocomplete="off" oninput="onSkuChanged()" onfocus="showSkuSuggestions()" onblur="hideSkuSuggestionsWithDelay()">
+              <button class="btn btn-primary px-3" type="button" onclick="startScanner('sku', '掃描料號 QR Code')" title="掃描料號 QR Code">
+                <i class="bi bi-qr-code-scan me-1"></i>掃碼
+              </button>
+              <button class="btn btn-outline-secondary" type="button" onclick="queryCurrentStock()" title="查詢即時庫存">
+                <i class="bi bi-search"></i>
+              </button>
+            </div>
+            <!-- Mobile-optimized floating suggestion list -->
+            <div id="skuSuggestions" class="sku-autocomplete-dropdown"></div>
           </div>
           <div id="skuFeedback" class="form-text text-muted small mt-1">
             料號自動驗證來自「貨架[報表]」A 欄。
@@ -1073,22 +1116,117 @@
     }
   }
 
-  // Handle SKU Changed (Auto fill location & show balance if found)
+  // Handle SKU Changed (Auto fill location & show balance if found, and render suggestions)
   function onSkuChanged() {
-    const val = document.getElementById('skuInput').value.trim();
+    const rawVal = document.getElementById('skuInput').value;
+    const val = rawVal.trim().toUpperCase();
     if (!val) {
       document.getElementById('stockInquiry').innerText = '';
+      hideSkuSuggestions();
       return;
     }
-    const match = cachedSkuReport.find(item => item.sku.toLowerCase() === val.toLowerCase());
+    const match = cachedSkuReport.find(item => item.sku.toUpperCase() === val);
     if (match) {
       if (match.loc && !document.getElementById('locInput').value) {
-        document.getElementById('locInput').value = match.loc;
+        document.getElementById('locInput').value = match.loc.toUpperCase();
       }
       if (match.balance) {
         document.getElementById('stockInquiry').innerHTML = '<span class="badge bg-info-subtle text-info-emphasis">結存: ' + match.balance + '</span>';
       }
+    } else {
+      document.getElementById('stockInquiry').innerText = '';
     }
+
+    renderSkuSuggestions(val);
+  }
+
+  function renderSkuSuggestions(query) {
+    const container = document.getElementById('skuSuggestions');
+    if (!container) return;
+
+    if (!query || query.length < 2) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    const upperQuery = query.toUpperCase();
+    // Unique SKUs
+    const seen = new Set();
+    const matches = [];
+
+    for (let item of cachedSkuReport) {
+      const s = item.sku.toUpperCase();
+      if (s.includes(upperQuery) && !seen.has(s)) {
+        seen.add(s);
+        matches.push(item);
+        if (matches.length >= 8) break; // Limit to 8 items to prevent tall dropdowns
+      }
+    }
+
+    if (matches.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    let html = '';
+    matches.forEach(item => {
+      const s = item.sku.toUpperCase();
+      const idx = s.indexOf(upperQuery);
+      let highlighted = s;
+      if (idx >= 0) {
+        highlighted = s.substring(0, idx) +
+          '<span class="sku-highlight">' + s.substring(idx, idx + upperQuery.length) + '</span>' +
+          s.substring(idx + upperQuery.length);
+      }
+      const locText = item.loc ? `<span class="badge bg-light text-secondary border me-1">${item.loc}</span>` : '';
+      const balText = item.balance ? `<span class="badge bg-primary-subtle text-primary">庫存: ${item.balance}</span>` : '';
+      
+      // Escape for single quote in onclick
+      const safeSku = s.replace(/'/g, "\\'");
+      const safeLoc = (item.loc || '').replace(/'/g, "\\'");
+      const safeBal = (item.balance || '').replace(/'/g, "\\'");
+
+      html += `<div class="sku-autocomplete-item" onmousedown="selectSkuSuggestion('${safeSku}', '${safeLoc}', '${safeBal}')">
+        <div><i class="bi bi-tag text-primary me-1"></i><strong>${highlighted}</strong></div>
+        <div class="small">${locText}${balText}</div>
+      </div>`;
+    });
+
+    container.innerHTML = html;
+    container.style.display = 'block';
+  }
+
+  function selectSkuSuggestion(sku, loc, balance) {
+    const input = document.getElementById('skuInput');
+    input.value = sku.toUpperCase();
+    if (loc && !document.getElementById('locInput').value) {
+      document.getElementById('locInput').value = loc.toUpperCase();
+    }
+    if (balance) {
+      document.getElementById('stockInquiry').innerHTML = '<span class="badge bg-info-subtle text-info-emphasis">結存: ' + balance + '</span>';
+    }
+    hideSkuSuggestions();
+    input.focus();
+  }
+
+  function showSkuSuggestions() {
+    const val = document.getElementById('skuInput').value.trim().toUpperCase();
+    if (val.length >= 2) {
+      renderSkuSuggestions(val);
+    }
+  }
+
+  function hideSkuSuggestions() {
+    const container = document.getElementById('skuSuggestions');
+    if (container) {
+      container.style.display = 'none';
+    }
+  }
+
+  function hideSkuSuggestionsWithDelay() {
+    setTimeout(hideSkuSuggestions, 200);
   }
 
   function queryCurrentStock() {
