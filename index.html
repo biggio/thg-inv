@@ -172,22 +172,23 @@
       </button>
     </form>
 
-    <!-- 最近提交記錄 (A~G 欄回顧) -->
+    <!-- 最近提交記錄 (A~G 欄回顧，支援修改與刪除) -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-bold text-slate-700 flex items-center space-x-1.5">
           <i data-lucide="history" class="w-4 h-4 text-slate-500"></i>
-          <span>近期異動記錄 (貨架[填單])</span>
+          <span>近期記錄 (點擊可修改/刪除)</span>
         </h2>
         <span class="text-xs text-slate-400" id="recordCount">載入中...</span>
       </div>
-      <div id="recordList" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+      <div id="recordList" class="space-y-2 max-h-72 overflow-y-auto pr-1">
         <div class="text-center py-4 text-slate-400 text-sm">正在載入紀錄...</div>
       </div>
     </div>
 
   </main>
 
+  <!-- 原生相機備援 input -->
   <input type="file" id="fallbackFileInput" accept="image/*" capture="environment" class="hidden">
 
   <!-- 即時相機掃描全螢幕視窗 -->
@@ -223,6 +224,75 @@
         <i data-lucide="camera" class="w-4 h-4"></i>
         <span>拍照備援</span>
       </button>
+    </div>
+  </div>
+
+  <!-- 修改/刪除記錄 Modal -->
+  <div id="editModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-base text-slate-800 flex items-center space-x-2">
+          <i data-lucide="edit-3" class="w-5 h-5 text-indigo-600"></i>
+          <span>編輯試算表記錄 (<span id="editRowBadge" class="text-indigo-600"></span>)</span>
+        </h3>
+        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="editForm" class="space-y-3">
+        <input type="hidden" id="editRowIndex">
+        <input type="hidden" id="editDate">
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">料號 (B)</label>
+            <input type="text" id="editSku" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">儲位 (D)</label>
+            <input type="text" id="editLocation" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">數量 (C)</label>
+            <input type="number" id="editQty" required min="1" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">進出類別 (E)</label>
+            <select id="editType" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold">
+              <option value="1 In">1 In (進庫)</option>
+              <option value="3 Out">3 Out (出庫)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">經辦人 (F)</label>
+            <input type="text" id="editOperator" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">備註 (G)</label>
+            <input type="text" id="editNote" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm">
+          </div>
+        </div>
+
+        <div class="flex gap-2 justify-between pt-3 border-t">
+          <button type="button" id="btnDeleteRecord" class="px-3.5 py-2 text-xs bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold rounded-xl flex items-center space-x-1">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+            <span>刪除整行</span>
+          </button>
+          <div class="flex gap-2">
+            <button type="button" onclick="closeEditModal()" class="px-3.5 py-2 text-xs text-slate-600 font-medium">取消</button>
+            <button type="submit" id="btnSaveEdit" class="px-4 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">
+              儲存更新
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -265,6 +335,7 @@
     let cameraList = [];
     let currentCameraIndex = 0;
     let activeItemList = [];
+    let recentRecordsCache = [];
 
     let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
 
@@ -303,6 +374,20 @@
     const apiConfigAlert = document.getElementById('apiConfigAlert');
     const apiModal = document.getElementById('apiModal');
     const apiEndpointInput = document.getElementById('apiEndpointInput');
+
+    // 編輯 Modal 相關
+    const editModal = document.getElementById('editModal');
+    const editRowBadge = document.getElementById('editRowBadge');
+    const editRowIndex = document.getElementById('editRowIndex');
+    const editDate = document.getElementById('editDate');
+    const editSku = document.getElementById('editSku');
+    const editLocation = document.getElementById('editLocation');
+    const editQty = document.getElementById('editQty');
+    const editType = document.getElementById('editType');
+    const editOperator = document.getElementById('editOperator');
+    const editNote = document.getElementById('editNote');
+    const btnDeleteRecord = document.getElementById('btnDeleteRecord');
+    const btnSaveEdit = document.getElementById('btnSaveEdit');
 
     if (!API_ENDPOINT) {
       apiConfigAlert.classList.remove('hidden');
@@ -387,11 +472,9 @@
       btnClearLoc.classList.add('hidden');
     });
 
-    // 【秒開核心】：本地 LocalStorage 快取 + 背景非同步靜默更新
     const LOCAL_ITEMS_KEY = 'thg_cached_active_items';
     const LOCAL_ITEMS_TIME_KEY = 'thg_cached_active_items_time';
 
-    // 1. 頁面開啟時立刻從本機 LocalStorage 讀取（耗時 0.001 秒，完全不等待！）
     function initActiveItemsFromLocal() {
       const cached = localStorage.getItem(LOCAL_ITEMS_KEY);
       if (cached) {
@@ -403,13 +486,11 @@
       }
     }
 
-    // 2. 背景非同步同步（不阻礙使用者操作，並存回本機）
     async function loadActiveItems(force = false) {
       if (!API_ENDPOINT) return;
 
       const lastSync = parseInt(localStorage.getItem(LOCAL_ITEMS_TIME_KEY) || '0');
       const now = Date.now();
-      // 若距上次同步不到 1 小時且已有快取，且非手動強制刷新，則直接略過網路請求！
       if (!force && activeItemList.length > 0 && (now - lastSync < 3600000)) {
         return;
       }
@@ -426,7 +507,7 @@
           localStorage.setItem(LOCAL_ITEMS_TIME_KEY, now.toString());
           skuSourceHint.textContent = `已同步 ${activeItemList.length} 種品項`;
           skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
-          if (force) showToast(`品項庫存表已更新 (${activeItemList.length} 筆)`, 'success');
+          if (force) showToast(`品項表已更新 (${activeItemList.length} 筆)`, 'success');
         }
       } catch (e) {
         if (activeItemList.length > 0) {
@@ -437,9 +518,7 @@
       }
     }
 
-    btnSyncSkus.addEventListener('click', () => {
-      loadActiveItems(true);
-    });
+    btnSyncSkus.addEventListener('click', () => loadActiveItems(true));
 
     function handleSkuAutoComplete(query) {
       query = query.trim().toLowerCase();
@@ -688,6 +767,7 @@
       setTimeout(finishSuccess, 1200);
     });
 
+    // 載入歷史記錄
     async function loadRecentRecords() {
       if (!API_ENDPOINT) {
         recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先綁定 Apps Script 網址</div>`;
@@ -700,6 +780,7 @@
         const res = await fetch(`${API_ENDPOINT}?action=getRecords`);
         const data = await res.json();
         if (data.success && data.records) {
+          recentRecordsCache = data.records;
           renderRecords(data.records);
         } else {
           recordList.innerHTML = `<div class="text-rose-500 text-xs py-2">載入失敗: ${data.error}</div>`;
@@ -718,16 +799,17 @@
         return;
       }
 
-      recordList.innerHTML = records.map(r => {
+      recordList.innerHTML = records.map((r, idx) => {
         const isOut = r.type === '3 Out' || r.type === '出' || r.type === '出庫';
         const badgeColor = isOut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
         const qtyPrefix = isOut ? '-' : '+';
         return `
-          <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+          <div class="p-2.5 bg-slate-50 hover:bg-indigo-50/50 border border-slate-200 rounded-xl flex items-center justify-between text-xs cursor-pointer transition active:scale-[0.99]" onclick="openEditModal(${idx})">
             <div class="space-y-0.5">
               <div class="flex items-center space-x-1.5">
                 <span class="px-1.5 py-0.5 rounded font-bold ${badgeColor}">${r.type}</span>
                 <span class="font-bold text-slate-800 text-sm font-mono">${r.sku}</span>
+                <span class="text-[10px] text-slate-400 font-mono">#${r.rowIndex}行</span>
               </div>
               <div class="text-slate-500 flex items-center space-x-2">
                 <span>儲位: <b class="text-slate-700">${r.location}</b></span>
@@ -735,16 +817,122 @@
               </div>
               <div class="text-slate-400 text-[10px]">${r.date} ${r.note ? `| ${r.note}` : ''}</div>
             </div>
-            <div class="text-right">
+            <div class="flex items-center space-x-2">
               <span class="text-base font-bold font-mono ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
                 ${qtyPrefix}${r.qty}
               </span>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400"></i>
             </div>
           </div>
         `;
       }).join('');
       lucide.createIcons();
     }
+
+    // 開啟編輯 Modal
+    window.openEditModal = function(index) {
+      const record = recentRecordsCache[index];
+      if (!record) return;
+
+      editRowIndex.value = record.rowIndex;
+      editRowBadge.textContent = `第 ${record.rowIndex} 行`;
+      editDate.value = record.date;
+      editSku.value = record.sku;
+      editLocation.value = record.location;
+      editQty.value = record.qty;
+      editType.value = (record.type === '3 Out' || record.type === '出' || record.type === '出庫') ? '3 Out' : '1 In';
+      editOperator.value = record.operator;
+      editNote.value = record.note;
+
+      editModal.classList.remove('hidden');
+      lucide.createIcons();
+    };
+
+    window.closeEditModal = function() {
+      editModal.classList.add('hidden');
+    };
+
+    // 儲存修改
+    document.getElementById('editForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const rowIndex = editRowIndex.value;
+      if (!rowIndex) return;
+
+      btnSaveEdit.disabled = true;
+      btnSaveEdit.textContent = "更新中...";
+
+      const postData = {
+        action: 'update',
+        rowIndex: rowIndex,
+        date: editDate.value,
+        sku: editSku.value.trim(),
+        location: editLocation.value.trim(),
+        qty: parseInt(editQty.value) || 1,
+        type: editType.value,
+        operator: editOperator.value.trim(),
+        note: editNote.value.trim()
+      };
+
+      const qs = new URLSearchParams(postData).toString();
+      const targetUrl = `${API_ENDPOINT}?${qs}`;
+
+      const beacon = new Image();
+      let done = false;
+
+      const finishEdit = () => {
+        if (done) return;
+        done = true;
+        btnSaveEdit.disabled = false;
+        btnSaveEdit.textContent = "儲存更新";
+        closeEditModal();
+        showToast(`第 ${rowIndex} 行記錄已更新成功！`, 'success');
+        setTimeout(loadRecentRecords, 1500);
+      };
+
+      beacon.onload = finishEdit;
+      beacon.onerror = finishEdit;
+      beacon.src = targetUrl;
+      setTimeout(finishEdit, 1200);
+    });
+
+    // 刪除整行記錄
+    btnDeleteRecord.addEventListener('click', () => {
+      const rowIndex = editRowIndex.value;
+      if (!rowIndex) return;
+
+      if (!confirm(`確定要從 Google 試算表刪除第 ${rowIndex} 行嗎？刪除後無法還原。`)) {
+        return;
+      }
+
+      btnDeleteRecord.disabled = true;
+      btnDeleteRecord.textContent = "刪除中...";
+
+      const postData = {
+        action: 'delete',
+        rowIndex: rowIndex
+      };
+
+      const qs = new URLSearchParams(postData).toString();
+      const targetUrl = `${API_ENDPOINT}?${qs}`;
+
+      const beacon = new Image();
+      let done = false;
+
+      const finishDelete = () => {
+        if (done) return;
+        done = true;
+        btnDeleteRecord.disabled = false;
+        btnDeleteRecord.textContent = "刪除整行";
+        closeEditModal();
+        showToast(`第 ${rowIndex} 行記錄已成功刪除！`, 'success');
+        setTimeout(loadRecentRecords, 1500);
+      };
+
+      beacon.onload = finishDelete;
+      beacon.onerror = finishDelete;
+      beacon.src = targetUrl;
+      setTimeout(finishDelete, 1200);
+    });
 
     btnRefresh.addEventListener('click', () => {
       loadActiveItems(true);
@@ -773,7 +961,6 @@
       }, 2500);
     }
 
-    // 啟動流程：立刻讀取本機快取 -> 背景靜默檢查同步
     initActiveItemsFromLocal();
     loadActiveItems(false);
     loadRecentRecords();

@@ -1,10 +1,6 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
- * 負責讀取與寫入「貨架[填單]」A~G 欄位
- * 
- * 性能大幅優化：
- * 1. 使用 CacheService 快取 Active_Item 料號清單（6 小時），免去每次開啟試算表搜尋
- * 2. 使用 TextFinder 逆向查找 A 欄最後非空行 (0.05 秒)
+ * 負責讀取、寫入、修改、刪除「貨架[填單]」A~G 欄位
  */
 
 const SHEET_NAME = "貨架[填單]";
@@ -22,7 +18,7 @@ function getActualLastRowFast(sheet) {
   return Math.max(1, sheet.getLastRow());
 }
 
-// 取得「Active_Item」分頁 B 欄的可用料號 (結合 ScriptCache 快取 6 小時)
+// 取得「Active_Item」分頁 B 欄可用料號
 function getActiveItems(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_active_items_list";
@@ -41,7 +37,6 @@ function getActiveItems(forceRefresh) {
     const sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
     if (!sheet) return { success: true, items: [] };
 
-    // 用 TextFinder 快速抓取 B 欄所有有資料的儲存格
     const finder = sheet.getRange("B2:B").createTextFinder(".+").useRegularExpression(true);
     const results = finder.findAll();
     const items = [];
@@ -60,12 +55,9 @@ function getActiveItems(forceRefresh) {
       updatedAt: new Date().getTime()
     };
 
-    // 存入快取 6 小時 (21600 秒)
     try {
       cache.put(cacheKey, JSON.stringify(response), 21600);
-    } catch (cacheErr) {
-      // 若超過 100KB 限制則不強求放入 GAS 伺服端快取
-    }
+    } catch (cacheErr) {}
 
     return response;
   } catch (err) {
@@ -81,6 +73,10 @@ function doGet(e) {
   try {
     if (params.action === 'submit') {
       result = submitRecord(params);
+    } else if (params.action === 'update') {
+      result = updateRecord(params);
+    } else if (params.action === 'delete') {
+      result = deleteRecord(params.rowIndex);
     } else if (params.action === 'getRecords') {
       result = getRecentRecords();
     } else if (params.action === 'queryStock') {
@@ -112,7 +108,14 @@ function doPost(e) {
     } else if (e.parameter) {
       postData = e.parameter;
     }
-    result = submitRecord(postData);
+
+    if (postData.action === 'update') {
+      result = updateRecord(postData);
+    } else if (postData.action === 'delete') {
+      result = deleteRecord(postData.rowIndex);
+    } else {
+      result = submitRecord(postData);
+    }
   } catch (err) {
     result = { success: false, error: err.toString() };
   }
@@ -121,7 +124,7 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 取得最近記錄 (最多 15 筆)
+// 取得最近記錄 (回傳精確行號 rowIndex 供編輯與刪除)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -133,7 +136,7 @@ function getRecentRecords() {
       return { success: true, records: [] };
     }
     
-    const startRow = Math.max(2, actualLastRow - 14);
+    const startRow = Math.max(2, actualLastRow - 19);
     const numRows = actualLastRow - startRow + 1;
     const values = sheet.getRange(startRow, 1, numRows, 7).getValues();
     
@@ -147,7 +150,7 @@ function getRecentRecords() {
         dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
       }
       records.push({
-        id: startRow + i,
+        rowIndex: startRow + i, // 精確試算表實體行號 (如: 第 45 行)
         date: String(dateVal),
         sku: String(row[1] || '').trim(),
         qty: Number(row[2]) || 0,
@@ -161,6 +164,80 @@ function getRecentRecords() {
     return { success: true, records: records.reverse() };
   } catch (err) {
     return { success: false, error: err.toString() };
+  }
+}
+
+// 修改特定行號的記錄
+function updateRecord(data) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+    const rowIndex = parseInt(data.rowIndex);
+    if (!rowIndex || rowIndex < 2) throw new Error("無效的資料行號");
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) throw new Error("找不到工作表");
+
+    const sku = String(data.sku || '').trim();
+    const qty = Number(data.qty) || 0;
+    const location = String(data.location || '').trim();
+    
+    let rawType = String(data.type || '').trim();
+    let typeFormatted = (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') ? "3 Out" : "1 In";
+    
+    const operator = String(data.operator || '').trim();
+    const note = String(data.note || '').trim();
+    
+    // 日期若無更新則保留原格內容
+    let formattedDate = data.date;
+    if (!formattedDate) {
+      const existingDate = sheet.getRange(rowIndex, 1).getValue();
+      if (existingDate instanceof Date) {
+        formattedDate = Utilities.formatDate(existingDate, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
+      } else {
+        formattedDate = String(existingDate || '');
+      }
+    }
+
+    sheet.getRange(rowIndex, 1, 1, 7).setValues([[
+      formattedDate,
+      sku,
+      qty,
+      location,
+      typeFormatted,
+      operator,
+      note
+    ]]);
+
+    return { success: true, message: "修改成功", rowIndex: rowIndex };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 刪除特定行號的記錄 (清除該行內容，或刪除整行)
+function deleteRecord(rowIndex) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+    rowIndex = parseInt(rowIndex);
+    if (!rowIndex || rowIndex < 2) throw new Error("無效的資料行號");
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) throw new Error("找不到工作表");
+
+    // 刪除該行
+    sheet.deleteRow(rowIndex);
+
+    return { success: true, message: `已成功刪除第 ${rowIndex} 行記錄` };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  } finally {
+    lock.releaseLock();
   }
 }
 
