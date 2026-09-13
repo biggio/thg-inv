@@ -230,15 +230,15 @@
         <!-- Type Selection -->
         <div class="row g-2 mb-3">
           <div class="col-6">
-            <input type="radio" class="btn-check" name="typeOption" id="typeIn" value="入庫" checked onchange="handleTypeChange()">
+            <input type="radio" class="btn-check" name="typeOption" id="typeIn" value="1 In" checked onchange="handleTypeChange()">
             <label class="btn btn-outline-success btn-type w-100" for="typeIn">
-              <i class="bi bi-box-arrow-in-down"></i> 入庫
+              <i class="bi bi-box-arrow-in-down"></i> 入庫 (1 In)
             </label>
           </div>
           <div class="col-6">
-            <input type="radio" class="btn-check" name="typeOption" id="typeOut" value="出庫" onchange="handleTypeChange()">
+            <input type="radio" class="btn-check" name="typeOption" id="typeOut" value="3 Out" onchange="handleTypeChange()">
             <label class="btn btn-outline-danger btn-type w-100" for="typeOut">
-              <i class="bi bi-box-arrow-up"></i> 出庫
+              <i class="bi bi-box-arrow-up"></i> 出庫 (3 Out)
             </label>
           </div>
         </div>
@@ -422,8 +422,8 @@
         <div class="mb-3">
           <label class="form-label">類型</label>
           <select class="form-select" id="editType">
-            <option value="入庫">入庫</option>
-            <option value="出庫">出庫</option>
+            <option value="1 In">1 In (入庫)</option>
+            <option value="3 Out">3 Out (出庫)</option>
           </select>
         </div>
         <div class="mb-3">
@@ -1165,8 +1165,8 @@
     }
 
     const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const dateStr = now.getFullYear() + '/' + pad(now.getMonth()+1) + '/' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    // Format: M/D/YYYY (e.g. 9/11/2026)
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
 
     // Target columns: A=Date, B=SKU, C=Qty, D=Loc, E=Type, F=Who, G=Note
     const rowValues = [dateStr, sku, qty, loc, type, who, note];
@@ -1219,7 +1219,7 @@
     const listEl = document.getElementById('recentList');
     if (!listEl) return;
 
-    const isOut = item.type === '出庫';
+    const isOut = item.type === '3 Out' || item.type === '出庫' || item.type.includes('Out');
     const badgeClass = isOut ? 'badge-out' : 'badge-in';
 
     const div = document.createElement('div');
@@ -1266,7 +1266,7 @@
         sku: r[1] || '',
         qty: r[2] || '',
         loc: r[3] || '',
-        type: r[4] || '入庫',
+        type: r[4] || '1 In',
         who: r[5] || '',
         note: r[6] || ''
       })).filter(item => item.sku || item.date);
@@ -1276,7 +1276,7 @@
 
       let html = '';
       recent.forEach(item => {
-        const isOut = item.type === '出庫';
+        const isOut = item.type === '3 Out' || item.type === '出庫' || item.type.includes('Out');
         const badgeClass = isOut ? 'badge-out' : 'badge-in';
 
         html += `
