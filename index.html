@@ -852,6 +852,7 @@
   }
 
   // 2. Refresh SKU List & Balances from 貨架[報表]!A2:G
+  // Note: Column A = SKU (料號), Column B = Location (儲位), Column G/F/C = Balance (現存量)
   async function refreshSkuList() {
     try {
       const rows = await apiGetValues("'貨架[報表]'!A2:G");
@@ -863,17 +864,14 @@
 
       rows.forEach(r => {
         if (!r || r.length === 0) return;
+        // Column A is SKU (料號)
         const colA = (r[0] || '').toString().trim();
+        // Column B is Location (儲位)
         const colB = (r[1] || '').toString().trim();
         const balance = (r[6] || r[5] || r[2] || '').toString().trim();
 
-        // SKU can be in B or A depending on report layout
-        let sku = colB || colA;
-        let loc = (colA !== sku) ? colA : '';
-        if (colA && colB && colB.length > colA.length) {
-          sku = colB;
-          loc = colA;
-        }
+        const sku = colA;
+        const loc = colB;
 
         if (sku) {
           cachedSkuReport.push({ sku, loc, balance, raw: r });
@@ -885,7 +883,7 @@
           }
         }
       });
-      console.log('Loaded ' + skuSet.size + ' unique SKUs from 貨架[報表]');
+      console.log('Loaded ' + skuSet.size + ' unique SKUs from 貨架[報表] A欄');
     } catch (err) {
       console.error('Failed to refresh SKU report:', err);
     }
