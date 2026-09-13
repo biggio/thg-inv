@@ -23,13 +23,13 @@ function createResponse(data, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 快速尋找 A 欄最後有內容的行號 (極速且絕對不超時)
+// 快速尋找 A 欄最後有內容的行號 (極速、零記憶體開銷、絕不超時與 OOM)
 function getActualLastRowFast(sheet) {
   try {
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return 1;
 
-    // 從最後一行往上只抓 50 行檢查 A 欄
+    // 從最後一行往上只抓最多 50 行，若皆為空則分批往上找，最多檢查 200 行
     const checkCount = Math.min(50, lastRow - 1);
     const startRow = lastRow - checkCount + 1;
     const aVals = sheet.getRange(startRow, 1, checkCount, 1).getValues();
@@ -41,11 +41,15 @@ function getActualLastRowFast(sheet) {
       }
     }
 
-    // 若最後 50 行沒找到（可能底下有大量空公式行），使用 TextFinder 精準搜尋非空字串
-    const finder = sheet.getRange("A:A").createTextFinder(".+").useRegularExpression(true);
-    const cell = finder.findPrevious(); // 從最後一個匹配往前找第一個
-    if (cell) {
-      return cell.getRow();
+    // 若最後 50 行皆空，安全往前回溯最多 200 行
+    const deeperCount = Math.min(200, lastRow - 1);
+    const deeperStart = Math.max(2, lastRow - deeperCount + 1);
+    const deeperVals = sheet.getRange(deeperStart, 1, deeperCount, 1).getValues();
+    for (let r = deeperVals.length - 1; r >= 0; r--) {
+      const v = deeperVals[r][0];
+      if (v !== "" && v !== null && v !== undefined) {
+        return deeperStart + r;
+      }
     }
 
     return lastRow;
@@ -54,7 +58,7 @@ function getActualLastRowFast(sheet) {
   }
 }
 
-// 取得「Active_Item」分頁 B 欄可用料號 (快取 6 小時，無鎖極速)
+// 取得「Active_Item」分頁 B 欄可用料號 (記憶體安全防護，上限 3000 筆)
 function getActiveItems(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_active_items_list";
@@ -84,7 +88,9 @@ function getActiveItems(forceRefresh) {
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return { success: true, items: [] };
 
-    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    // 嚴格限制讀取範圍，最多 3000 行，杜絕 50,000 空行引發 Out of Memory
+    const maxRead = Math.min(lastRow - 1, 3000);
+    const bValues = sheet.getRange(2, 2, maxRead, 1).getValues();
     const items = [];
     for (let i = 0; i < bValues.length; i++) {
       const val = String(bValues[i][0] || '').trim();
@@ -95,11 +101,16 @@ function getActiveItems(forceRefresh) {
     const response = {
       success: true,
       items: uniqueItems,
+      count: uniqueItems.length,
       updatedAt: new Date().getTime()
     };
 
     try {
-      cache.put(cacheKey, JSON.stringify(response), 21600);
+      // 若清單較大，CacheService 上限為 100KB
+      const cacheStr = JSON.stringify(response);
+      if (cacheStr.length < 95000) {
+        cache.put(cacheKey, cacheStr, 21600);
+      }
     } catch (cacheErr) {}
 
     return response;
@@ -108,7 +119,7 @@ function getActiveItems(forceRefresh) {
   }
 }
 
-// 取得 Who 人員清單 (快取 6 小時，無鎖極速)
+// 取得 Who 人員清單 (記憶體安全防護，上限 300 筆)
 function getWhoList(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_who_list";
@@ -159,7 +170,9 @@ function getWhoList(forceRefresh) {
       return { success: true, list: [], sheetFound: targetSheet.getName() };
     }
 
-    const cValues = targetSheet.getRange(2, 3, lastRow - 1, 1).getValues();
+    // 人員清單只抓前 300 行，杜絕讀取整張工作表上萬行
+    const maxRead = Math.min(lastRow - 1, 300);
+    const cValues = targetSheet.getRange(2, 3, maxRead, 1).getValues();
     const whoList = [];
 
     for (let i = 0; i < cValues.length; i++) {
@@ -213,8 +226,8 @@ function queryStock(sku) {
       return { success: true, sku: sku, stockMap: {}, total: 0, sheet: sheet.getName() };
     }
 
-    // 透過 TextFinder 在 A 欄迅速找定位
-    const textFinder = sheet.getRange("A:A").createTextFinder(sku);
+    // 透過 TextFinder 在 A 欄迅速找定位 (完全符合料號，避免全表泛濫比對)
+    const textFinder = sheet.getRange("A:A").createTextFinder(sku).matchEntireCell(true);
     const foundCells = textFinder.findAll();
     const stockMap = {};
     let total = 0;
