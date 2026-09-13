@@ -189,7 +189,12 @@
           <i data-lucide="history" class="w-4 h-4 text-slate-500"></i>
           <span>近期記錄 (點擊可修改/刪除)</span>
         </h2>
-        <span class="text-xs text-slate-400" id="recordCount">載入中...</span>
+        <div class="flex items-center space-x-2">
+          <span class="text-xs text-slate-400" id="recordCount">載入中...</span>
+          <button type="button" id="btnReloadRecords" class="text-indigo-600 hover:text-indigo-800 p-1" title="重整記錄清單">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
       </div>
       <div id="recordList" class="space-y-2 max-h-72 overflow-y-auto pr-1">
         <div class="text-center py-4 text-slate-400 text-sm">正在載入紀錄...</div>
@@ -352,6 +357,41 @@
 
     lucide.createIcons();
 
+    // 通用 JSONP 讀取函式 (100% 避開 CORS / 302 跳轉限制)
+    function jsonpFetch(url) {
+      return new Promise((resolve, reject) => {
+        const callbackName = 'thg_cb_' + Math.round(100000 * Math.random());
+        const script = document.createElement('script');
+        
+        const cleanup = () => {
+          delete window[callbackName];
+          if (script.parentNode) script.parentNode.removeChild(script);
+        };
+
+        window[callbackName] = (data) => {
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = () => {
+          cleanup();
+          reject(new Error('網路連線失敗或後端未回應'));
+        };
+
+        const delimiter = url.includes('?') ? '&' : '?';
+        script.src = `${url}${delimiter}callback=${callbackName}`;
+        document.body.appendChild(script);
+
+        // 超時處理 10 秒
+        setTimeout(() => {
+          if (window[callbackName]) {
+            cleanup();
+            reject(new Error('連線超時'));
+          }
+        }, 10000);
+      });
+    }
+
     // DOM 節點
     const modeInBtn = document.getElementById('modeIn');
     const modeOutBtn = document.getElementById('modeOut');
@@ -383,6 +423,7 @@
     const recordList = document.getElementById('recordList');
     const recordCount = document.getElementById('recordCount');
     const btnRefresh = document.getElementById('btnRefresh');
+    const btnReloadRecords = document.getElementById('btnReloadRecords');
     const apiConfigAlert = document.getElementById('apiConfigAlert');
     const apiModal = document.getElementById('apiModal');
     const apiEndpointInput = document.getElementById('apiEndpointInput');
@@ -501,9 +542,7 @@
       if (cachedWho) {
         try {
           whoList = JSON.parse(cachedWho);
-          if (whoList && whoList.length > 0) {
-            renderWhoDropdown(whoList);
-          }
+          if (whoList && whoList.length > 0) renderWhoDropdown(whoList);
         } catch (e) {}
       }
     }
@@ -516,8 +555,7 @@
 
       skuSourceHint.textContent = `同步品項中...`;
       try {
-        const res = await fetch(`${API_ENDPOINT}?action=getActiveItems${force ? '&force=1' : ''}`);
-        const data = await res.json();
+        const data = await jsonpFetch(`${API_ENDPOINT}?action=getActiveItems${force ? '&force=1' : ''}`);
         if (data.success && data.items) {
           activeItemList = data.items;
           localStorage.setItem(LOCAL_ITEMS_KEY, JSON.stringify(activeItemList));
@@ -528,7 +566,6 @@
       } catch (e) {}
     }
 
-    // 載入 List 分頁 C 欄的 Who 清單 (強化診斷回饋)
     async function loadWhoList(force = false) {
       if (!API_ENDPOINT) {
         selectWho.innerHTML = `<option value="">請先設定 Apps Script 網址</option>`;
@@ -540,8 +577,7 @@
       }
 
       try {
-        const res = await fetch(`${API_ENDPOINT}?action=getWhoList${force ? '&force=1' : ''}`);
-        const data = await res.json();
+        const data = await jsonpFetch(`${API_ENDPOINT}?action=getWhoList${force ? '&force=1' : ''}`);
         if (data.success) {
           if (data.list && data.list.length > 0) {
             whoList = data.list;
@@ -550,7 +586,7 @@
             if (force) showToast(`已載入 ${whoList.length} 位人員`, 'success');
           } else {
             selectWho.innerHTML = `<option value="">List 分頁 C 欄無資料</option>`;
-            showToast("List 分頁的 C 欄目前為空白", "info");
+            showToast("List 分頁 C 欄為空白", "info");
           }
         } else {
           selectWho.innerHTML = `<option value="">載入失敗: ${data.error || '未知錯誤'}</option>`;
@@ -739,24 +775,24 @@
       if (inputSku.value.trim()) fetchStockInfo(inputSku.value.trim());
     });
 
+    // 透過 JSONP 查詢結存庫存 (貨架[報表])
     async function fetchStockInfo(sku) {
       if (!API_ENDPOINT) return;
       stockNotice.classList.remove('hidden');
-      stockNoticeContent.innerHTML = `<span class="animate-pulse">查詢【${sku}】即時結存中...</span>`;
+      stockNoticeContent.innerHTML = `<span class="animate-pulse">查詢【${sku}】報表結存中...</span>`;
 
       try {
-        const res = await fetch(`${API_ENDPOINT}?action=queryStock&sku=${encodeURIComponent(sku)}`);
-        const data = await res.json();
+        const data = await jsonpFetch(`${API_ENDPOINT}?action=queryStock&sku=${encodeURIComponent(sku)}`);
         if (data.success) {
           const keys = Object.keys(data.stockMap);
           if (keys.length === 0) {
-            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 目前無任何入庫記錄。`;
+            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 目前報表中無結存數據。`;
           } else {
             let details = keys.map(k => `${k}: <b>${data.stockMap[k]}</b>`).join('，');
             stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 總結存: <span class="font-bold text-emerald-600 text-base">${data.total}</span> (分佈: ${details})`;
           }
         } else {
-          stockNoticeContent.innerHTML = `無法取得庫存: ${data.error}`;
+          stockNoticeContent.innerHTML = `查詢未成功: ${data.error || '無資料'}`;
         }
       } catch (err) {
         stockNoticeContent.innerHTML = `查詢失敗: ${err.message || err}`;
@@ -829,6 +865,7 @@
       setTimeout(finishSuccess, 1200);
     });
 
+    // 【核心修復】：採用 JSONP 抓取近期記錄（100% 避開 CORS / 302 跨來源阻擋）
     async function loadRecentRecords() {
       if (!API_ENDPOINT) {
         recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先綁定 Apps Script 網址</div>`;
@@ -838,17 +875,16 @@
 
       recordCount.textContent = "載入中...";
       try {
-        const res = await fetch(`${API_ENDPOINT}?action=getRecords`);
-        const data = await res.json();
+        const data = await jsonpFetch(`${API_ENDPOINT}?action=getRecords`);
         if (data.success && data.records) {
           recentRecordsCache = data.records;
           renderRecords(data.records);
         } else {
-          recordList.innerHTML = `<div class="text-rose-500 text-xs py-2">載入失敗: ${data.error}</div>`;
+          recordList.innerHTML = `<div class="text-rose-500 text-xs py-2 text-center">載入失敗: ${data.error || '未知錯誤'}</div>`;
           recordCount.textContent = "";
         }
       } catch (err) {
-        recordList.innerHTML = `<div class="text-slate-400 text-xs py-2 text-center">無法即時載入清單 (請確認網路)</div>`;
+        recordList.innerHTML = `<div class="text-slate-400 text-xs py-2 text-center">連線中... (點右上方旋轉圖示可重試)</div>`;
         recordCount.textContent = "";
       }
     }
@@ -889,6 +925,8 @@
       }).join('');
       lucide.createIcons();
     }
+
+    btnReloadRecords.addEventListener('click', loadRecentRecords);
 
     window.openEditModal = function(index) {
       const record = recentRecordsCache[index];

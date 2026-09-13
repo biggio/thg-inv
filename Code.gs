@@ -1,11 +1,6 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取、寫入、修改、刪除「貨架[填單]」A~G 欄位
- * 
- * 結存查詢來源：直接讀取「貨架[報表]」
- * - 料號：A 欄 (第 1 欄)
- * - 儲位：B 欄 (第 2 欄)
- * - 結存數：G 欄 (第 7 欄)
  */
 
 const SHEET_NAME = "貨架[填單]";
@@ -13,13 +8,34 @@ const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
 const LIST_SHEET_NAME = "List";
 const REPORT_SHEET_NAME = "貨架[報表]";
 
+// 輔助：安全將物件封裝成 JSON 或 JSONP
+function createResponse(data, callback) {
+  const jsonStr = JSON.stringify(data);
+  if (callback) {
+    // 支援 JSONP 模式 (100% 免疫任何 CORS / 302 重導向攔截)
+    return ContentService.createTextOutput(callback + "(" + jsonStr + ")")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(jsonStr)
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 // 高性能查找 A 欄最後有內容的行號
 function getActualLastRowFast(sheet) {
   try {
-    const finder = sheet.getRange("A:A").createTextFinder(".+").useRegularExpression(true);
-    const results = finder.findAll();
-    if (results && results.length > 0) {
-      return results[results.length - 1].getRow();
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return 1;
+
+    // 抓取最後 500 行範圍內搜尋，避免超大表格卡頓
+    const startCheck = Math.max(1, lastRow - 500);
+    const numCheck = lastRow - startCheck + 1;
+    const aVals = sheet.getRange(startCheck, 1, numCheck, 1).getValues();
+
+    for (let r = aVals.length - 1; r >= 0; r--) {
+      const v = aVals[r][0];
+      if (v !== "" && v !== null && v !== undefined) {
+        return startCheck + r;
+      }
     }
   } catch (e) {}
   return Math.max(1, sheet.getLastRow());
@@ -43,8 +59,7 @@ function getActiveItems(forceRefresh) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
     if (!sheet) {
-      const sheets = ss.getSheets();
-      for (let s of sheets) {
+      for (let s of ss.getSheets()) {
         if (s.getName().trim().toLowerCase() === ACTIVE_ITEM_SHEET_NAME.toLowerCase()) {
           sheet = s;
           break;
@@ -122,7 +137,7 @@ function getWhoList(forceRefresh) {
     if (!targetSheet) {
       return {
         success: false,
-        error: "找不到 List 分頁。目前試算表所有分頁為：[" + sheetNames.join(', ') + "]"
+        error: "找不到 List 分頁。現有分頁：[" + sheetNames.join(', ') + "]"
       };
     }
 
@@ -158,8 +173,7 @@ function getWhoList(forceRefresh) {
   }
 }
 
-// 【核心更新】：直接從「貨架[報表]」查詢料號在各儲位之結存
-// 料號：A 欄 (1), 儲位：B 欄 (2), 結存數：G 欄 (7)
+// 查詢結存 (貨架[報表]：料號 A, 儲位 B, 結存數 G)
 function queryStock(sku) {
   try {
     if (!sku) return { success: true, stockMap: {}, total: 0 };
@@ -168,9 +182,7 @@ function queryStock(sku) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(REPORT_SHEET_NAME);
     if (!sheet) {
-      // 模糊比對報表分頁名稱
-      const allSheets = ss.getSheets();
-      for (let s of allSheets) {
+      for (let s of ss.getSheets()) {
         if (s.getName().includes('報表') || s.getName().toLowerCase().includes('report')) {
           sheet = s;
           break;
@@ -182,7 +194,6 @@ function queryStock(sku) {
       return { success: false, error: "找不到「" + REPORT_SHEET_NAME + "」分頁", stockMap: {}, total: 0 };
     }
     
-    // 使用 TextFinder 在「貨架[報表]」A 欄 (料號) 快速搜尋該料號所有行
     const textFinder = sheet.getRange("A:A").createTextFinder(sku).matchEntireCell(true);
     const foundCells = textFinder.findAll();
     
@@ -192,9 +203,8 @@ function queryStock(sku) {
     if (foundCells && foundCells.length > 0) {
       foundCells.forEach(cell => {
         const row = cell.getRow();
-        if (row === 1) return; // 跳過表頭
+        if (row === 1) return;
 
-        // 讀取 B 欄 (儲位) 與 G 欄 (結存數)
         const locVal = String(sheet.getRange(row, 2).getValue() || '未指定儲位').trim();
         const qtyVal = Number(sheet.getRange(row, 7).getValue()) || 0;
         
@@ -215,73 +225,20 @@ function queryStock(sku) {
   }
 }
 
-// 處理 GET 請求
-function doGet(e) {
-  const params = (e && e.parameter) ? e.parameter : {};
-  let result = {};
-
-  try {
-    if (params.action === 'submit') {
-      result = submitRecord(params);
-    } else if (params.action === 'update') {
-      result = updateRecord(params);
-    } else if (params.action === 'delete') {
-      result = deleteRecord(params.rowIndex);
-    } else if (params.action === 'getRecords') {
-      result = getRecentRecords();
-    } else if (params.action === 'queryStock') {
-      result = queryStock(params.sku);
-    } else if (params.action === 'getActiveItems') {
-      result = getActiveItems(params.force === '1');
-    } else if (params.action === 'getWhoList') {
-      result = getWhoList(params.force === '1');
-    } else {
-      result = { status: "online", message: "THG 庫存管理 API 運作中" };
-    }
-  } catch (err) {
-    result = { success: false, error: err.toString() };
-  }
-
-  return ContentService.createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// 處理 POST 請求
-function doPost(e) {
-  let result = {};
-  try {
-    let postData = {};
-    if (e.postData && e.postData.contents) {
-      try {
-        postData = JSON.parse(e.postData.contents);
-      } catch (jsonErr) {
-        postData = e.parameter || {};
-      }
-    } else if (e.parameter) {
-      postData = e.parameter;
-    }
-
-    if (postData.action === 'update') {
-      result = updateRecord(postData);
-    } else if (postData.action === 'delete') {
-      result = deleteRecord(postData.rowIndex);
-    } else {
-      result = submitRecord(postData);
-    }
-  } catch (err) {
-    result = { success: false, error: err.toString() };
-  }
-
-  return ContentService.createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// 取得最近記錄 (最多 20 筆)
+// 取得最近記錄 (最多 20 筆，容錯增強版)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: true, records: [] };
+    if (!sheet) {
+      for (let s of ss.getSheets()) {
+        if (s.getName().includes('填單')) {
+          sheet = s;
+          break;
+        }
+      }
+    }
+    if (!sheet) return { success: false, error: "找不到「貨架[填單]」工作表", records: [] };
     
     const actualLastRow = getActualLastRowFast(sheet);
     if (actualLastRow <= 1) {
@@ -296,7 +253,7 @@ function getRecentRecords() {
     for (let i = 0; i < values.length; i++) {
       const row = values[i];
       let dateVal = row[0];
-      if (!dateVal) continue;
+      if (dateVal === "" || dateVal === null || dateVal === undefined) continue;
       
       if (dateVal instanceof Date) {
         dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
@@ -315,7 +272,7 @@ function getRecentRecords() {
     
     return { success: true, records: records.reverse() };
   } catch (err) {
-    return { success: false, error: err.toString() };
+    return { success: false, error: err.toString(), records: [] };
   }
 }
 
@@ -444,4 +401,64 @@ function submitRecord(data) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// 處理 GET 請求
+function doGet(e) {
+  const params = (e && e.parameter) ? e.parameter : {};
+  const callback = params.callback; // 支援 JSONP
+  let result = {};
+
+  try {
+    if (params.action === 'submit') {
+      result = submitRecord(params);
+    } else if (params.action === 'update') {
+      result = updateRecord(params);
+    } else if (params.action === 'delete') {
+      result = deleteRecord(params.rowIndex);
+    } else if (params.action === 'getRecords') {
+      result = getRecentRecords();
+    } else if (params.action === 'queryStock') {
+      result = queryStock(params.sku);
+    } else if (params.action === 'getActiveItems') {
+      result = getActiveItems(params.force === '1');
+    } else if (params.action === 'getWhoList') {
+      result = getWhoList(params.force === '1');
+    } else {
+      result = { status: "online", message: "THG 庫存管理 API 運作中" };
+    }
+  } catch (err) {
+    result = { success: false, error: err.toString() };
+  }
+
+  return createResponse(result, callback);
+}
+
+// 處理 POST 請求
+function doPost(e) {
+  let result = {};
+  try {
+    let postData = {};
+    if (e.postData && e.postData.contents) {
+      try {
+        postData = JSON.parse(e.postData.contents);
+      } catch (jsonErr) {
+        postData = e.parameter || {};
+      }
+    } else if (e.parameter) {
+      postData = e.parameter;
+    }
+
+    if (postData.action === 'update') {
+      result = updateRecord(postData);
+    } else if (postData.action === 'delete') {
+      result = deleteRecord(postData.rowIndex);
+    } else {
+      result = submitRecord(postData);
+    }
+  } catch (err) {
+    result = { success: false, error: err.toString() };
+  }
+
+  return createResponse(result, null);
 }
