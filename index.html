@@ -162,6 +162,31 @@
       animation: shakeBorder 0.4s ease-in-out;
       border-color: #ef4444 !important;
     }
+    .custom-toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      background: rgba(15, 23, 42, 0.95);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 50px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+      backdrop-filter: blur(8px);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .custom-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(10px);
+    }
   </style>
 </head>
 <body>
@@ -445,6 +470,12 @@
   </div>
 </div>
 
+<!-- Custom Toast Notification -->
+<div id="customToast" class="custom-toast">
+  <i id="customToastIcon" class="bi bi-check-circle-fill text-success"></i>
+  <span id="customToastMsg">單據送出成功！</span>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   // Configuration Keys
@@ -498,6 +529,27 @@
 
   function hideLoading() {
     document.getElementById('loadingOverlay').style.display = 'none';
+  }
+
+  function showToast(msg, type = 'success') {
+    const toast = document.getElementById('customToast');
+    const toastMsg = document.getElementById('customToastMsg');
+    const toastIcon = document.getElementById('customToastIcon');
+    if (!toast) return;
+
+    toastMsg.innerText = msg;
+    if (type === 'success') {
+      toastIcon.className = 'bi bi-check-circle-fill text-success';
+    } else if (type === 'error') {
+      toastIcon.className = 'bi bi-x-circle-fill text-danger';
+    } else {
+      toastIcon.className = 'bi bi-info-circle-fill text-info';
+    }
+
+    toast.classList.add('show');
+    setTimeout(() => {
+      toast.classList.remove('show');
+    }, 2500);
   }
 
   function updateClock() {
@@ -1121,33 +1173,84 @@
 
     showLoading('正在送出單據至 Google Sheets...');
     try {
-      await apiAppendValues("'貨架[填單]'!A:G", rowValues);
+      const appendPromise = apiAppendValues("'貨架[填單]'!A:G", rowValues);
       
       // Save last who
       localStorage.setItem(STORAGE_KEYS.LAST_WHO, who);
 
-      // Reset form
+      // Reset form immediately
       document.getElementById('skuInput').value = '';
       document.getElementById('qtyInput').value = '';
       document.getElementById('locInput').value = '';
       document.getElementById('noteInput').value = '';
       document.getElementById('stockInquiry').innerText = '';
 
-      // Reload recent records
-      await loadRecentRecords();
-      alert('單據送出成功！');
+      // Immediately prepend to recent records UI optimistically
+      const newRecordItem = {
+        actualRow: '新',
+        date: dateStr,
+        sku: sku,
+        qty: qty,
+        loc: loc,
+        type: type,
+        who: who,
+        note: note
+      };
+      prependRecentItemUI(newRecordItem);
+
+      // Wait for the append API call to finish
+      await appendPromise;
+
+      // Immediately hide full-screen blocker and show smooth top toast!
+      hideLoading();
+      showToast('✅ 單據已成功送出！', 'success');
+
+      // Reload recent records silently in background without blocking user
+      setTimeout(loadRecentRecords, 1000);
     } catch (err) {
+      hideLoading();
       alert('送出失敗: ' + err.message);
       console.error(err);
-    } finally {
-      hideLoading();
     }
+  }
+
+  // Helper to immediately render a record at the top of recent list
+  function prependRecentItemUI(item) {
+    const listEl = document.getElementById('recentList');
+    if (!listEl) return;
+
+    const isOut = item.type === '出庫';
+    const badgeClass = isOut ? 'badge-out' : 'badge-in';
+
+    const div = document.createElement('div');
+    div.className = 'recent-item bg-light';
+    div.innerHTML = `
+      <div style="flex: 1; min-width: 0;" class="me-2">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span class="badge status-badge ${badgeClass}">${item.type}</span>
+          <strong class="text-truncate" style="font-size: 1rem;">${item.sku}</strong>
+          <span class="fw-bold ${isOut ? 'text-danger' : 'text-success'}">${item.qty}</span>
+          <span class="badge bg-secondary-subtle text-secondary" style="font-size: 0.7rem;">剛剛</span>
+        </div>
+        <div class="text-muted small d-flex flex-wrap gap-2">
+          <span><i class="bi bi-geo-alt"></i> ${item.loc || '無儲位'}</span>
+          <span><i class="bi bi-person"></i> ${item.who || '未知'}</span>
+          <span><i class="bi bi-clock"></i> ${item.date}</span>
+          ${item.note ? `<span><i class="bi bi-chat-dots"></i> ${item.note}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    // If first item was loading or empty, clear it
+    if (listEl.children.length === 1 && listEl.children[0].classList.contains('text-center')) {
+      listEl.innerHTML = '';
+    }
+    listEl.prepend(div);
   }
 
   // 4. Load Recent Records from 貨架[填單]!A:G
   async function loadRecentRecords() {
     const listEl = document.getElementById('recentList');
-    listEl.innerHTML = '<div class="p-3 text-center text-muted small"><div class="spinner-border spinner-border-sm text-primary me-2"></div>正在讀取最新單據...</div>';
 
     try {
       const rows = await apiGetValues("'貨架[填單]'!A2:G");
