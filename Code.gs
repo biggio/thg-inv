@@ -1,18 +1,21 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取與寫入「貨架[填單]」A~G 欄位
- * 完美支援 CORS 跨來源讀寫 (GitHub Pages / 獨立前端專用)
+ * 全面支援外部網頁以 CORS mode: no-cors 或 GET/JSONP 發送
  */
 
 const SHEET_NAME = "貨架[填單]";
 
-// 處理 GET 請求 (查詢存量、取得近期記錄)
+// 處理 GET 請求 (查詢存量、取得記錄、或以 GET 寫入避免跨域問題)
 function doGet(e) {
   const params = (e && e.parameter) ? e.parameter : {};
   let result = {};
 
   try {
-    if (params.action === 'getRecords') {
+    if (params.action === 'submit') {
+      // 支援前端以 GET 方式寫入（100% 避開瀏覽器 CORS 預檢限制）
+      result = submitRecord(params);
+    } else if (params.action === 'getRecords') {
       result = getRecentRecords();
     } else if (params.action === 'queryStock') {
       result = queryStock(params.sku);
@@ -27,13 +30,17 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 處理 POST 請求 (提交寫入 A~G 欄)
+// 處理 POST 請求
 function doPost(e) {
   let result = {};
   try {
     let postData = {};
     if (e.postData && e.postData.contents) {
-      postData = JSON.parse(e.postData.contents);
+      try {
+        postData = JSON.parse(e.postData.contents);
+      } catch (jsonErr) {
+        postData = e.parameter || {};
+      }
     } else if (e.parameter) {
       postData = e.parameter;
     }

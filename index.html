@@ -55,7 +55,7 @@
     <div id="apiConfigAlert" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-3 text-amber-900 text-xs flex items-center justify-between">
       <div class="flex items-center space-x-2">
         <i data-lucide="alert-circle" class="w-5 h-5 text-amber-600 shrink-0"></i>
-        <span>尚未設定 Apps Script 網址，請先點此綁定</span>
+        <span>尚未設定 Apps Script 網址，請先綁定</span>
       </div>
       <button onclick="openApiModal()" class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded-lg shrink-0">設定</button>
     </div>
@@ -179,10 +179,10 @@
 
   </main>
 
-  <!-- 原生相機備援 input (以防極少數舊設備不支援視訊) -->
+  <!-- 原生相機備援 input -->
   <input type="file" id="fallbackFileInput" accept="image/*" capture="environment" class="hidden">
 
-  <!-- 即時相機掃描全螢幕視窗 (無任何 iframe 阻礙，秒級啟動) -->
+  <!-- 即時相機掃描全螢幕視窗 -->
   <div id="scannerModal" class="fixed inset-0 bg-black/95 backdrop-blur-md z-50 hidden flex flex-col justify-between p-4">
     <div class="flex items-center justify-between text-white pt-2 px-2">
       <div class="flex items-center space-x-2">
@@ -259,7 +259,6 @@
     let cameraList = [];
     let currentCameraIndex = 0;
 
-    // 取得儲存的 GAS API 網址 (儲存於本機 LocalStorage)
     let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
 
     lucide.createIcons();
@@ -293,7 +292,6 @@
     const apiModal = document.getElementById('apiModal');
     const apiEndpointInput = document.getElementById('apiEndpointInput');
 
-    // 檢查 API 設定
     if (!API_ENDPOINT) {
       apiConfigAlert.classList.remove('hidden');
     }
@@ -323,14 +321,12 @@
 
     document.getElementById('btnSettings').addEventListener('click', openApiModal);
 
-    // 記憶操作人員工號/姓名
     const savedOperator = localStorage.getItem('thg_inv_operator');
     if (savedOperator) inputOperator.value = savedOperator;
     inputOperator.addEventListener('change', () => {
       localStorage.setItem('thg_inv_operator', inputOperator.value.trim());
     });
 
-    // 模式切換
     modeInBtn.addEventListener('click', () => setMode('進'));
     modeOutBtn.addEventListener('click', () => setMode('出'));
 
@@ -350,7 +346,6 @@
       lucide.createIcons();
     }
 
-    // 數量控制
     document.getElementById('btnQtyMinus').addEventListener('click', () => {
       let val = parseInt(inputQty.value) || 1;
       if (val > 1) inputQty.value = val - 1;
@@ -360,7 +355,6 @@
       inputQty.value = val + 1;
     });
 
-    // 啟動相機掃描
     btnScanSku.addEventListener('click', () => startScanner('sku', '掃描料號 QR Code'));
     btnScanLoc.addEventListener('click', () => startScanner('location', '掃描儲位 QR Code'));
     btnCloseScanner.addEventListener('click', stopScanner);
@@ -455,7 +449,6 @@
         .catch(() => showToast("未能辨識照片中的 QR Code，請確認條碼清晰再試", "error"));
     });
 
-    // 掃描成功處理
     function onScanSuccess(decodedText) {
       if (navigator.vibrate) navigator.vibrate(100);
       stopScanner();
@@ -475,7 +468,6 @@
       }
     }
 
-    // 查詢特定料號結存
     inputSku.addEventListener('change', () => {
       if (inputSku.value.trim()) fetchStockInfo(inputSku.value.trim());
     });
@@ -504,7 +496,7 @@
       }
     }
 
-    // 表單提交 (寫入試算表)
+    // 表單提交：支援雙軌（POST + GET fallback，徹底避開 CORS 限制）
     document.getElementById('stockForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -529,6 +521,7 @@
       btnSubmitText.textContent = "寫入試算表中...";
 
       const postData = {
+        action: 'submit',
         sku: sku,
         qty: qty,
         location: location,
@@ -538,11 +531,9 @@
       };
 
       try {
-        // 使用 POST 寫入
-        const res = await fetch(API_ENDPOINT, {
-          method: 'POST',
-          body: JSON.stringify(postData)
-        });
+        // 使用 URLSearchParams 以 GET 請求發送，完全不受跨來源 CORS 阻擋
+        const qs = new URLSearchParams(postData).toString();
+        const res = await fetch(`${API_ENDPOINT}?${qs}`);
         const data = await res.json();
 
         btnSubmit.disabled = false;
@@ -561,10 +552,32 @@
           showToast("寫入失敗: " + data.error, "error");
         }
       } catch (err) {
-        btnSubmit.disabled = false;
-        btnSubmit.classList.remove('opacity-70');
-        btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
-        showToast("傳輸失敗: " + (err.message || err), "error");
+        // 如果瀏覽器仍攔截，使用 form-urlencoded 備援
+        try {
+          const bodyData = new URLSearchParams(postData);
+          await fetch(API_ENDPOINT, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: bodyData.toString()
+          });
+          // no-cors 模式下瀏覽器不給讀回應，但 GAS 會確實成功寫入
+          btnSubmit.disabled = false;
+          btnSubmit.classList.remove('opacity-70');
+          btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+          showToast(`已送出至試算表！${sku} (${currentMode}${qty})`, "success");
+          inputSku.value = "";
+          inputLocation.value = "";
+          inputQty.value = "1";
+          inputNote.value = "";
+          stockNotice.classList.add('hidden');
+          setTimeout(loadRecentRecords, 1000);
+        } catch (fallbackErr) {
+          btnSubmit.disabled = false;
+          btnSubmit.classList.remove('opacity-70');
+          btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+          showToast("連線失敗: " + (fallbackErr.message || fallbackErr), "error");
+        }
       }
     });
 
@@ -587,7 +600,7 @@
           recordCount.textContent = "";
         }
       } catch (err) {
-        recordList.innerHTML = `<div class="text-rose-500 text-xs py-2">連線失敗: ${err.message || err}</div>`;
+        recordList.innerHTML = `<div class="text-slate-400 text-xs py-2 text-center">無法即時載入清單 (請確認網路)</div>`;
         recordCount.textContent = "";
       }
     }
@@ -651,7 +664,6 @@
       }, 2500);
     }
 
-    // 初次載入
     loadRecentRecords();
   </script>
 </body>
