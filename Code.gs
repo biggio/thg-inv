@@ -3,51 +3,71 @@
  * 負責讀取與寫入「貨架[填單]」A~G 欄位
  * 
  * 性能大幅優化：
- * 1. 使用 TextFinder 逆向查找 A 欄最後非空行，速度從幾秒降低至 0.05 秒！
- * 2. 移除全表遍歷，大幅縮短寫入回應時間。
+ * 1. 使用 CacheService 快取 Active_Item 料號清單（6 小時），免去每次開啟試算表搜尋
+ * 2. 使用 TextFinder 逆向查找 A 欄最後非空行 (0.05 秒)
  */
 
 const SHEET_NAME = "貨架[填單]";
 const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
 
-// 高性能查找 A 欄最後有內容的行號 (極速 0.05 秒內完成)
+// 高性能查找 A 欄最後有內容的行號
 function getActualLastRowFast(sheet) {
   try {
-    // 透過 TextFinder 在 A 欄搜尋非空字元 (支援正則 .+)
     const finder = sheet.getRange("A:A").createTextFinder(".+").useRegularExpression(true);
     const results = finder.findAll();
     if (results && results.length > 0) {
       return results[results.length - 1].getRow();
     }
-  } catch (e) {
-    // 備用方案
-  }
+  } catch (e) {}
   return Math.max(1, sheet.getLastRow());
 }
 
-// 取得「Active_Item」分頁 B 欄的可用料號 (加上快取，避免每次重複掃描)
-function getActiveItems() {
+// 取得「Active_Item」分頁 B 欄的可用料號 (結合 ScriptCache 快取 6 小時)
+function getActiveItems(forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "thg_active_items_list";
+
+  if (!forceRefresh) {
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
+      try {
+        return JSON.parse(cachedData);
+      } catch (e) {}
+    }
+  }
+
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
     if (!sheet) return { success: true, items: [] };
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return { success: true, items: [] };
+    // 用 TextFinder 快速抓取 B 欄所有有資料的儲存格
+    const finder = sheet.getRange("B2:B").createTextFinder(".+").useRegularExpression(true);
+    const results = finder.findAll();
+    const items = [];
 
-    // 只抓 B 欄
-    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
-    const itemsSet = new Set();
-
-    for (let i = 0; i < bValues.length; i++) {
-      const val = String(bValues[i][0] || '').trim();
-      if (val) itemsSet.add(val);
+    if (results && results.length > 0) {
+      results.forEach(cell => {
+        const val = cell.getValue().toString().trim();
+        if (val) items.push(val);
+      });
     }
 
-    return {
+    const uniqueItems = Array.from(new Set(items));
+    const response = {
       success: true,
-      items: Array.from(itemsSet)
+      items: uniqueItems,
+      updatedAt: new Date().getTime()
     };
+
+    // 存入快取 6 小時 (21600 秒)
+    try {
+      cache.put(cacheKey, JSON.stringify(response), 21600);
+    } catch (cacheErr) {
+      // 若超過 100KB 限制則不強求放入 GAS 伺服端快取
+    }
+
+    return response;
   } catch (err) {
     return { success: false, error: err.toString(), items: [] };
   }
@@ -66,7 +86,7 @@ function doGet(e) {
     } else if (params.action === 'queryStock') {
       result = queryStock(params.sku);
     } else if (params.action === 'getActiveItems') {
-      result = getActiveItems();
+      result = getActiveItems(params.force === '1');
     } else {
       result = { status: "online", message: "THG 庫存管理 API 運作中" };
     }
@@ -101,7 +121,7 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 取得最近記錄 (最多 15 筆，極速版)
+// 取得最近記錄 (最多 15 筆)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -154,7 +174,6 @@ function queryStock(sku) {
     const sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) return { success: true, stockMap: {}, total: 0 };
     
-    // 用 TextFinder 只鎖定料號，避免撈取全表
     const textFinder = sheet.getRange("B:B").createTextFinder(sku).matchEntireCell(true);
     const foundCells = textFinder.findAll();
     
@@ -166,7 +185,7 @@ function queryStock(sku) {
         const row = cell.getRow();
         if (row === 1) return;
         const rowData = sheet.getRange(row, 1, 1, 5).getValues()[0];
-        if (!rowData[0]) return; // A 欄有值
+        if (!rowData[0]) return;
         
         const qty = Number(rowData[2]) || 0;
         const loc = String(rowData[3] || '未指定儲位').trim();
@@ -189,7 +208,7 @@ function queryStock(sku) {
   }
 }
 
-// 寫入一筆庫存紀錄 (極速優化)
+// 寫入一筆庫存紀錄
 function submitRecord(data) {
   const lock = LockService.getScriptLock();
   try {
@@ -219,11 +238,9 @@ function submitRecord(data) {
     if (qty <= 0) throw new Error("數量必須大於 0");
     if (!location) throw new Error("儲位不能為空");
     
-    // 極速定位最後一行
     const actualLastRow = getActualLastRowFast(sheet);
     const targetRow = actualLastRow + 1;
     
-    // 寫入
     sheet.getRange(targetRow, 1, 1, 7).setValues([[
       formattedDate,
       sku,
