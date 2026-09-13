@@ -23,27 +23,35 @@ function createResponse(data, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 快速尋找 A 欄最後有內容的行號 (極速 0.05 秒)
+// 快速尋找 A 欄最後有內容的行號 (極速且絕對不超時)
 function getActualLastRowFast(sheet) {
   try {
-    const finder = sheet.getRange("A:A").createTextFinder(".+").useRegularExpression(true);
-    const results = finder.findAll();
-    if (results && results.length > 0) {
-      return results[results.length - 1].getRow();
-    }
-  } catch (e) {}
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return 1;
 
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return 1;
-  const startCheck = Math.max(1, lastRow - 100);
-  const numCheck = lastRow - startCheck + 1;
-  const aVals = sheet.getRange(startCheck, 1, numCheck, 1).getValues();
-  for (let r = aVals.length - 1; r >= 0; r--) {
-    if (aVals[r][0] !== "" && aVals[r][0] !== null && aVals[r][0] !== undefined) {
-      return startCheck + r;
+    // 從最後一行往上只抓 50 行檢查 A 欄
+    const checkCount = Math.min(50, lastRow - 1);
+    const startRow = lastRow - checkCount + 1;
+    const aVals = sheet.getRange(startRow, 1, checkCount, 1).getValues();
+
+    for (let r = aVals.length - 1; r >= 0; r--) {
+      const v = aVals[r][0];
+      if (v !== "" && v !== null && v !== undefined) {
+        return startRow + r;
+      }
     }
+
+    // 若最後 50 行沒找到（可能底下有大量空公式行），使用 TextFinder 精準搜尋非空字串
+    const finder = sheet.getRange("A:A").createTextFinder(".+").useRegularExpression(true);
+    const cell = finder.findPrevious(); // 從最後一個匹配往前找第一個
+    if (cell) {
+      return cell.getRow();
+    }
+
+    return lastRow;
+  } catch (e) {
+    return Math.max(1, sheet.getLastRow());
   }
-  return Math.max(1, lastRow);
 }
 
 // 取得「Active_Item」分頁 B 欄可用料號 (快取 6 小時，無鎖極速)
@@ -218,8 +226,10 @@ function queryStock(sku) {
         if (row === 1) return;
         const rowSku = String(cell.getValue() || '').trim().toLowerCase();
         if (rowSku === targetSkuLower) {
-          const locVal = String(sheet.getRange(row, 2).getValue() || '未指定儲位').trim();
-          const qtyVal = Number(sheet.getRange(row, 7).getValue()) || 0;
+          // 一次性讀取 B 欄到 G 欄 (6 欄)，避免多次 API 往返
+          const rowData = sheet.getRange(row, 2, 1, 6).getValues()[0];
+          const locVal = String(rowData[0] || '未指定儲位').trim();
+          const qtyVal = Number(rowData[5]) || 0; // G 欄在 B 欄向右偏移 5
           stockMap[locVal] = (stockMap[locVal] || 0) + qtyVal;
           total += qtyVal;
         }

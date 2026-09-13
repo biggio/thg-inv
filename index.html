@@ -387,9 +387,9 @@
         setTimeout(() => {
           if (window[callbackName]) {
             cleanup();
-            reject(new Error('連線超時'));
+            reject(new Error('連線逾時 (Apps Script 回應時間過長)'));
           }
-        }, 12000);
+        }, 25000);
       });
     }
 
@@ -880,7 +880,7 @@
           recordCount.textContent = "";
         }
       } catch (err) {
-        recordList.innerHTML = `<div class="text-slate-400 text-xs py-2 text-center">連線中... (點右上方旋轉圖示可重試)</div>`;
+        recordList.innerHTML = `<div class="text-rose-500 text-xs py-2 text-center">連線逾時 (${err.message})<br><button onclick="loadRecentRecords()" class="mt-1 text-indigo-600 underline font-medium">點此重試</button></div>`;
         recordCount.textContent = "";
       }
     }
@@ -1041,10 +1041,15 @@
       }, 2500);
     }
 
+    // 初始化優先順序：
+    // 1. 本地快取秒開 (0 秒)
+    // 2. 優先載入近期記錄 (使用者最關心的資料)
+    // 3. 錯開 1 秒載入人員清單 (若無快取)
+    // 4. 錯開 2 秒載入料號清單 (若無快取)
     initFromLocal();
-    loadActiveItems(false);
-    loadWhoList(false);
     loadRecentRecords();
+    setTimeout(() => loadWhoList(false), 800);
+    setTimeout(() => loadActiveItems(false), 1600);
   </script>
 </body>
 </html>
