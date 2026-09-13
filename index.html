@@ -225,7 +225,7 @@
             <span id="stockInquiry" class="text-muted small fw-normal"></span>
           </label>
           <div class="input-group">
-            <input type="text" class="form-control form-control-lg" id="skuInput" list="skuDatalist" placeholder="輸入料號或掃描..." required autocomplete="off" oninput="onSkuChanged()">
+            <input type="text" class="form-control form-control-lg" id="skuInput" placeholder="輸入料號或掃碼..." required autocomplete="off" oninput="onSkuChanged()">
             <button class="btn btn-primary px-3" type="button" onclick="startScanner('sku', '掃描料號 QR Code')" title="掃描料號 QR Code">
               <i class="bi bi-qr-code-scan me-1"></i>掃碼
             </button>
@@ -233,7 +233,6 @@
               <i class="bi bi-search"></i>
             </button>
           </div>
-          <datalist id="skuDatalist"></datalist>
           <div id="skuFeedback" class="form-text text-muted small mt-1">
             料號自動驗證來自「貨架[報表]」A 欄。
           </div>
@@ -248,12 +247,11 @@
           <div class="col-6">
             <label class="form-label">儲位 (Location)</label>
             <div class="input-group">
-              <input type="text" class="form-control form-control-lg" id="locInput" list="locDatalist" placeholder="儲位代號" autocomplete="off">
+              <input type="text" class="form-control form-control-lg" id="locInput" placeholder="儲位代號" autocomplete="off">
               <button class="btn btn-outline-secondary" type="button" onclick="startScanner('location', '掃描儲位 QR Code')" title="掃描儲位 QR Code">
                 <i class="bi bi-qr-code"></i>
               </button>
             </div>
-            <datalist id="locDatalist"></datalist>
             <div id="locFeedback" class="form-text text-muted small mt-1">
               可輸入或掃描 List 內之有效儲位。
             </div>
@@ -970,22 +968,15 @@
 
   // 1b. Load Valid Locations from List!D2:D
   async function loadLocationList() {
-    const locDatalist = document.getElementById('locDatalist');
     try {
       const rows = await apiGetValues("'List'!D2:D");
       validLocations = [];
-      if (locDatalist) locDatalist.innerHTML = '';
 
       rows.forEach(r => {
         if (r && r[0] && r[0].toString().trim()) {
           const loc = r[0].toString().trim();
           if (!validLocations.includes(loc)) {
             validLocations.push(loc);
-            if (locDatalist) {
-              const opt = document.createElement('option');
-              opt.value = loc;
-              locDatalist.appendChild(opt);
-            }
           }
         }
       });
@@ -1000,8 +991,6 @@
   async function refreshSkuList() {
     try {
       const rows = await apiGetValues("'貨架[報表]'!A2:G");
-      const datalist = document.getElementById('skuDatalist');
-      datalist.innerHTML = '';
       cachedSkuReport = [];
 
       const skuSet = new Set();
@@ -1019,12 +1008,7 @@
 
         if (sku) {
           cachedSkuReport.push({ sku, loc, balance, raw: r });
-          if (!skuSet.has(sku)) {
-            skuSet.add(sku);
-            const opt = document.createElement('option');
-            opt.value = sku;
-            datalist.appendChild(opt);
-          }
+          skuSet.add(sku);
         }
       });
       console.log('Loaded ' + skuSet.size + ' unique SKUs from 貨架[報表] A欄');
