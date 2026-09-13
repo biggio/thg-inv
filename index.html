@@ -372,7 +372,7 @@
             <div id="skuSuggestions" class="sku-autocomplete-dropdown"></div>
           </div>
           <div id="skuFeedback" class="form-text text-muted small mt-1">
-            料號自動驗證來自「貨架[報表]」A 欄。
+            支援掃描料號或 EAN-13 條碼（自動對應 dat_EAN 分頁）。
           </div>
         </div>
 
@@ -619,6 +619,7 @@
   let currentToken = null;
   let tokenClient = null;
   let cachedSkuReport = []; // Stores { sku, loc, balance } from 貨架[報表]
+  let cachedEanMap = new Map(); // Maps ean13 -> sku from dat_EAN!A:C
   let validLocations = []; // Stores valid locations from List!D2:D
   let cachedRecentList = []; // Stores recent records in memory
   let editModalInstance = null;
@@ -760,7 +761,10 @@
   }
 
   function launchWithId(cameraId) {
-    const config = { fps: 20, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
+    const isSku = currentScanTarget === 'sku';
+    // For SKU, use wider box to comfortably capture linear 1D barcodes like EAN-13
+    const qrbox = isSku ? { width: 280, height: 160 } : { width: 250, height: 250 };
+    const config = { fps: 20, qrbox: qrbox, aspectRatio: 1.0 };
     html5QrCode.start(cameraId, config, onScanSuccess)
       .then(() => {
         document.getElementById('cameraLoading').classList.add('d-none');
@@ -770,7 +774,9 @@
   }
 
   function launchFacingMode() {
-    const config = { fps: 20, qrbox: { width: 250, height: 250 } };
+    const isSku = currentScanTarget === 'sku';
+    const qrbox = isSku ? { width: 280, height: 160 } : { width: 250, height: 250 };
+    const config = { fps: 20, qrbox: qrbox };
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
         document.getElementById('cameraLoading').classList.add('d-none');
@@ -857,45 +863,53 @@
     }
 
     if (currentScanTarget === 'sku') {
-      if (cachedSkuReport.length > 0) {
-        const matched = cachedSkuReport.find(item => item.sku.toUpperCase() === val);
-        if (matched) {
-          // Valid SKU! Vibrate, close scanner, fill input, fill stock balance and loc
-          if (navigator.vibrate) navigator.vibrate(100);
-          stopScanner();
-          document.getElementById('skuInput').value = matched.sku.toUpperCase();
-          onSkuChanged();
-          queryCurrentStock();
+      let resolvedSku = val;
+      let matchedByEan = false;
+      let originalEan = '';
 
-          const fb = document.getElementById('skuFeedback');
-          if (fb) {
-            fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>料號驗證有效：' + matched.sku + '</span>';
-          }
+      // Check if scanned code is in dat_EAN map (EAN13 -> SKU)
+      if (cachedEanMap.has(val)) {
+        resolvedSku = cachedEanMap.get(val);
+        matchedByEan = true;
+        originalEan = val;
+      }
 
-          // If location is empty, guide to scan location
-          if (!document.getElementById('locInput').value) {
-            setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
-          }
-        } else {
-          // Invalid SKU: do NOT close camera, alert on HUD, vibrate error, keep camera running!
-          if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
-          showScannerHud(`⚠️「${val}」非有效料號，請重新對準料號碼`);
+      // 1. Try to find resolvedSku in cachedSkuReport
+      let matched = cachedSkuReport.find(item => item.sku.toUpperCase() === resolvedSku);
 
-          scannerCooldown = true;
-          setTimeout(() => {
-            scannerCooldown = false;
-          }, 1800);
-        }
-      } else {
-        // Fallback if sheet not loaded yet
+      // 2. If not matched in cachedSkuReport directly, but matched via EAN, or present in cachedSkuReport
+      if (matched || matchedByEan) {
+        // Valid SKU / EAN! Vibrate, close scanner, fill input, fill stock balance and loc
         if (navigator.vibrate) navigator.vibrate(100);
         stopScanner();
-        document.getElementById('skuInput').value = val;
+
+        const finalSku = matched ? matched.sku.toUpperCase() : resolvedSku;
+        document.getElementById('skuInput').value = finalSku;
         onSkuChanged();
         queryCurrentStock();
+
+        const fb = document.getElementById('skuFeedback');
+        if (fb) {
+          if (matchedByEan) {
+            fb.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>EAN-13 條碼 [${originalEan}] 成功對應料號：<strong>${finalSku}</strong></span>`;
+          } else {
+            fb.innerHTML = `<span class="text-success"><i class="bi bi-check-circle me-1"></i>料號驗證有效：<strong>${finalSku}</strong></span>`;
+          }
+        }
+
+        // If location is empty, guide to scan location
         if (!document.getElementById('locInput').value) {
           setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
         }
+      } else {
+        // Invalid SKU and not found in EAN13 map: do NOT close camera, alert on HUD, vibrate error, keep camera running!
+        if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+        showScannerHud(`⚠️「${val}」非有效料號或 EAN 條碼，請重新對準`);
+
+        scannerCooldown = true;
+        setTimeout(() => {
+          scannerCooldown = false;
+        }, 1800);
       }
     } else if (currentScanTarget === 'location') {
       if (validLocations.length > 0) {
@@ -1152,6 +1166,7 @@
       await Promise.allSettled([
         loadWhoList(),
         loadLocationList(),
+        loadEanList(),
         refreshSkuList(),
         loadRecentRecords()
       ]);
@@ -1206,6 +1221,27 @@
       console.log('Loaded ' + validLocations.length + ' valid locations from List!D2:D');
     } catch (err) {
       console.error('Failed to load Location list:', err);
+    }
+  }
+
+  // 1c. Load EAN13 Map from dat_EAN!A2:C
+  // Note: Column A = 料號 (SKU), Column C = EAN13
+  async function loadEanList() {
+    try {
+      const rows = await apiGetValues("'dat_EAN'!A2:C");
+      cachedEanMap.clear();
+
+      rows.forEach(r => {
+        if (!r || r.length === 0) return;
+        const sku = (r[0] || '').toString().trim().toUpperCase();
+        const ean = (r[2] || '').toString().trim().toUpperCase();
+        if (ean && sku) {
+          cachedEanMap.set(ean, sku);
+        }
+      });
+      console.log('Loaded ' + cachedEanMap.size + ' EAN-to-SKU mappings from dat_EAN!A:C');
+    } catch (err) {
+      console.error('Failed to load EAN list from dat_EAN:', err);
     }
   }
 
@@ -1434,10 +1470,11 @@
       return;
     }
 
-    if (cachedSkuReport.length > 0) {
-      const matchSku = cachedSkuReport.find(item => item.sku.toLowerCase() === sku.toLowerCase());
-      if (!matchSku) {
-        if (!confirm(`⚠️ 提醒：料號「${sku}」未在「貨架[報表]」A 欄名單中。\n是否仍確定要以此料號送出？`)) {
+    if (cachedSkuReport.length > 0 || cachedEanMap.size > 0) {
+      const matchSku = cachedSkuReport.some(item => item.sku.toLowerCase() === sku.toLowerCase());
+      const matchEanSku = Array.from(cachedEanMap.values()).some(s => s.toLowerCase() === sku.toLowerCase());
+      if (!matchSku && !matchEanSku) {
+        if (!confirm(`⚠️ 提醒：料號「${sku}」未在「貨架[報表]」或「dat_EAN」名單中。\n是否仍確定要以此料號送出？`)) {
           return;
         }
       }
