@@ -234,8 +234,8 @@
             </button>
           </div>
           <datalist id="skuDatalist"></datalist>
-          <div id="skuHelp" class="form-text text-muted small mt-1">
-            料號提示來自 [貨架報表]，即時直接抓取。
+          <div id="skuFeedback" class="form-text text-muted small mt-1">
+            料號自動驗證來自「貨架[報表]」A 欄。
           </div>
         </div>
 
@@ -636,15 +636,45 @@
     }
 
     if (currentScanTarget === 'sku') {
-      if (navigator.vibrate) navigator.vibrate(100);
-      stopScanner();
-      document.getElementById('skuInput').value = val;
-      onSkuChanged();
-      queryCurrentStock();
+      if (cachedSkuReport.length > 0) {
+        const matched = cachedSkuReport.find(item => item.sku.toLowerCase() === val.toLowerCase());
+        if (matched) {
+          // Valid SKU! Vibrate, close scanner, fill input, fill stock balance and loc
+          if (navigator.vibrate) navigator.vibrate(100);
+          stopScanner();
+          document.getElementById('skuInput').value = matched.sku;
+          onSkuChanged();
+          queryCurrentStock();
 
-      // If location is empty, automatically guide to scan location
-      if (!document.getElementById('locInput').value) {
-        setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
+          const fb = document.getElementById('skuFeedback');
+          if (fb) {
+            fb.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>料號驗證有效：' + matched.sku + '</span>';
+          }
+
+          // If location is empty, guide to scan location
+          if (!document.getElementById('locInput').value) {
+            setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
+          }
+        } else {
+          // Invalid SKU: do NOT close camera, alert on HUD, vibrate error, keep camera running!
+          if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+          showScannerHud(`⚠️「${val}」非有效料號，請重新對準料號碼`);
+
+          scannerCooldown = true;
+          setTimeout(() => {
+            scannerCooldown = false;
+          }, 1800);
+        }
+      } else {
+        // Fallback if sheet not loaded yet
+        if (navigator.vibrate) navigator.vibrate(100);
+        stopScanner();
+        document.getElementById('skuInput').value = val;
+        onSkuChanged();
+        queryCurrentStock();
+        if (!document.getElementById('locInput').value) {
+          setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
+        }
       }
     } else if (currentScanTarget === 'location') {
       if (validLocations.length > 0) {
@@ -1078,6 +1108,15 @@
     if (!sku || !qty || !who) {
       alert('請填寫完整必要欄位 (料號、數量、人員)！');
       return;
+    }
+
+    if (cachedSkuReport.length > 0) {
+      const matchSku = cachedSkuReport.find(item => item.sku.toLowerCase() === sku.toLowerCase());
+      if (!matchSku) {
+        if (!confirm(`⚠️ 提醒：料號「${sku}」未在「貨架[報表]」A 欄名單中。\n是否仍確定要以此料號送出？`)) {
+          return;
+        }
+      }
     }
 
     if (loc && validLocations.length > 0) {
