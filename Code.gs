@@ -1,10 +1,17 @@
 /**
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取、寫入、修改、刪除「貨架[填單]」A~G 欄位
+ * 
+ * 結存查詢來源：直接讀取「貨架[報表]」
+ * - 料號：A 欄 (第 1 欄)
+ * - 儲位：B 欄 (第 2 欄)
+ * - 結存數：G 欄 (第 7 欄)
  */
 
 const SHEET_NAME = "貨架[填單]";
 const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
+const LIST_SHEET_NAME = "List";
+const REPORT_SHEET_NAME = "貨架[報表]";
 
 // 高性能查找 A 欄最後有內容的行號
 function getActualLastRowFast(sheet) {
@@ -16,12 +23,6 @@ function getActualLastRowFast(sheet) {
     }
   } catch (e) {}
   return Math.max(1, sheet.getLastRow());
-}
-
-// 取得試算表中所有現存的分頁名稱（診斷用）
-function getAllSheetNames() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheets().map(s => s.getName());
 }
 
 // 取得「Active_Item」分頁 B 欄可用料號
@@ -79,7 +80,7 @@ function getActiveItems(forceRefresh) {
   }
 }
 
-// 取得 Who 人員清單（超寬容自動偵測：List、Lists、清單、人員等）
+// 取得 Who 人員清單 (List 分頁 C 欄)
 function getWhoList(forceRefresh) {
   const cache = CacheService.getScriptCache();
   const cacheKey = "thg_who_list";
@@ -98,11 +99,9 @@ function getWhoList(forceRefresh) {
     const allSheets = ss.getSheets();
     const sheetNames = allSheets.map(s => s.getName());
 
-    // 依序嘗試多種可能的分頁名稱
     let targetSheet = null;
     const candidates = ['list', 'lists', '清單', '人員', '經辦人', '名單', 'who'];
     
-    // 1. 完全相同或大小寫不拘
     for (let s of allSheets) {
       const sName = s.getName().trim().toLowerCase();
       if (sName === 'list' || candidates.includes(sName)) {
@@ -111,7 +110,6 @@ function getWhoList(forceRefresh) {
       }
     }
 
-    // 2. 包含 'list' 字眼
     if (!targetSheet) {
       for (let s of allSheets) {
         if (s.getName().toLowerCase().includes('list')) {
@@ -133,15 +131,12 @@ function getWhoList(forceRefresh) {
       return { success: true, list: [], sheetFound: targetSheet.getName() };
     }
 
-    // 讀取 C 欄 (第 3 欄)
     const cValues = targetSheet.getRange(2, 3, lastRow - 1, 1).getValues();
     const whoList = [];
 
     for (let i = 0; i < cValues.length; i++) {
       const val = String(cValues[i][0] || '').trim();
-      if (val) {
-        whoList.push(val);
-      }
+      if (val) whoList.push(val);
     }
 
     const uniqueWho = Array.from(new Set(whoList));
@@ -160,6 +155,63 @@ function getWhoList(forceRefresh) {
     return response;
   } catch (err) {
     return { success: false, error: err.toString(), list: [] };
+  }
+}
+
+// 【核心更新】：直接從「貨架[報表]」查詢料號在各儲位之結存
+// 料號：A 欄 (1), 儲位：B 欄 (2), 結存數：G 欄 (7)
+function queryStock(sku) {
+  try {
+    if (!sku) return { success: true, stockMap: {}, total: 0 };
+    sku = String(sku).trim();
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(REPORT_SHEET_NAME);
+    if (!sheet) {
+      // 模糊比對報表分頁名稱
+      const allSheets = ss.getSheets();
+      for (let s of allSheets) {
+        if (s.getName().includes('報表') || s.getName().toLowerCase().includes('report')) {
+          sheet = s;
+          break;
+        }
+      }
+    }
+
+    if (!sheet) {
+      return { success: false, error: "找不到「" + REPORT_SHEET_NAME + "」分頁", stockMap: {}, total: 0 };
+    }
+    
+    // 使用 TextFinder 在「貨架[報表]」A 欄 (料號) 快速搜尋該料號所有行
+    const textFinder = sheet.getRange("A:A").createTextFinder(sku).matchEntireCell(true);
+    const foundCells = textFinder.findAll();
+    
+    const stockMap = {};
+    let total = 0;
+    
+    if (foundCells && foundCells.length > 0) {
+      foundCells.forEach(cell => {
+        const row = cell.getRow();
+        if (row === 1) return; // 跳過表頭
+
+        // 讀取 B 欄 (儲位) 與 G 欄 (結存數)
+        const locVal = String(sheet.getRange(row, 2).getValue() || '未指定儲位').trim();
+        const qtyVal = Number(sheet.getRange(row, 7).getValue()) || 0;
+        
+        stockMap[locVal] = (stockMap[locVal] || 0) + qtyVal;
+        total += qtyVal;
+      });
+    }
+    
+    return {
+      success: true,
+      sku: sku,
+      stockMap: stockMap,
+      total: total,
+      sheet: sheet.getName()
+    };
+  } catch (err) {
+    return { success: false, error: err.toString(), stockMap: {}, total: 0 };
   }
 }
 
@@ -183,8 +235,6 @@ function doGet(e) {
       result = getActiveItems(params.force === '1');
     } else if (params.action === 'getWhoList') {
       result = getWhoList(params.force === '1');
-    } else if (params.action === 'getSheets') {
-      result = { success: true, sheets: getAllSheetNames() };
     } else {
       result = { status: "online", message: "THG 庫存管理 API 運作中" };
     }
@@ -258,7 +308,7 @@ function getRecentRecords() {
         qty: Number(row[2]) || 0,
         location: String(row[3] || '').trim(),
         type: String(row[4] || '').trim(),
-        operator: String(row[5] || '').trim(),
+        operator: String(row[5] || '').trim(), // Who
         note: String(row[6] || '').trim()
       });
     }
@@ -338,50 +388,6 @@ function deleteRecord(rowIndex) {
     return { success: false, error: err.toString() };
   } finally {
     lock.releaseLock();
-  }
-}
-
-// 依料號實時計算存量
-function queryStock(sku) {
-  try {
-    if (!sku) return { success: true, stockMap: {}, total: 0 };
-    sku = String(sku).trim();
-    
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) return { success: true, stockMap: {}, total: 0 };
-    
-    const textFinder = sheet.getRange("B:B").createTextFinder(sku).matchEntireCell(true);
-    const foundCells = textFinder.findAll();
-    
-    const stockMap = {};
-    let total = 0;
-    
-    if (foundCells && foundCells.length > 0) {
-      foundCells.forEach(cell => {
-        const row = cell.getRow();
-        if (row === 1) return;
-        const rowData = sheet.getRange(row, 1, 1, 5).getValues()[0];
-        if (!rowData[0]) return;
-        
-        const qty = Number(rowData[2]) || 0;
-        const loc = String(rowData[3] || '未指定儲位').trim();
-        const type = String(rowData[4] || '').trim();
-        
-        const delta = (type === '3 Out' || type === '出' || type === '出庫') ? -qty : qty;
-        stockMap[loc] = (stockMap[loc] || 0) + delta;
-        total += delta;
-      });
-    }
-    
-    return {
-      success: true,
-      sku: sku,
-      stockMap: stockMap,
-      total: total
-    };
-  } catch (err) {
-    return { success: false, error: err.toString() };
   }
 }
 
