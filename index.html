@@ -67,6 +67,26 @@
       color: #0284c7;
       text-decoration: underline;
     }
+    .qty-stepper-btn {
+      width: 42px;
+      font-weight: 700;
+      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* Hide default spinner arrows in number inputs */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+    input[type=number] {
+      -moz-appearance: textfield;
+    }
     .header-bar {
       background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
       color: white;
@@ -317,7 +337,11 @@
         <div class="row g-2 mb-3">
           <div class="col-6">
             <label class="form-label">數量 <span class="text-danger">*</span></label>
-            <input type="number" class="form-control form-control-lg" id="qtyInput" min="1" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="數量" required>
+            <div class="input-group">
+              <button class="btn btn-outline-secondary qty-stepper-btn" type="button" onclick="stepQty('qtyInput', -1)" title="減少數量">-</button>
+              <input type="number" class="form-control form-control-lg text-center fw-bold" id="qtyInput" min="1" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="數量" required>
+              <button class="btn btn-outline-secondary qty-stepper-btn" type="button" onclick="stepQty('qtyInput', 1)" title="增加數量">+</button>
+            </div>
           </div>
           <div class="col-6">
             <label class="form-label">儲位 (Location)</label>
@@ -337,7 +361,7 @@
         <div class="row g-2 mb-3">
           <div class="col-6">
             <label class="form-label">作業人員 (Who) <span class="text-danger">*</span></label>
-            <select class="form-select form-select-lg" id="whoSelect" required>
+            <select class="form-select form-select-lg" id="whoSelect" required onchange="onWhoChanged(this.value)">
               <option value="">載入中...</option>
             </select>
           </div>
@@ -488,7 +512,11 @@
         <div class="row g-2 mb-3">
           <div class="col-6">
             <label class="form-label">數量</label>
-            <input type="number" class="form-control" id="editQty" inputmode="numeric" pattern="[0-9]*" required>
+            <div class="input-group">
+              <button class="btn btn-outline-secondary qty-stepper-btn" type="button" onclick="stepQty('editQty', -1)">-</button>
+              <input type="number" class="form-control text-center fw-bold" id="editQty" min="1" step="1" inputmode="numeric" pattern="[0-9]*" required>
+              <button class="btn btn-outline-secondary qty-stepper-btn" type="button" onclick="stepQty('editQty', 1)">+</button>
+            </div>
           </div>
           <div class="col-6">
             <label class="form-label">儲位</label>
@@ -1280,6 +1308,28 @@
 
   function hideSkuSuggestionsWithDelay() {
     setTimeout(hideSkuSuggestions, 200);
+  }
+
+  // Stepper logic for quantity (+ / - buttons)
+  function stepQty(inputId, delta) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    let currentVal = parseInt(el.value, 10);
+    if (isNaN(currentVal) || currentVal <= 0) {
+      currentVal = 0;
+    }
+    let newVal = currentVal + delta;
+    if (newVal < 1) newVal = 1; // Minimum quantity is 1
+    el.value = newVal;
+    // Trigger any validation / events if needed
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Remember Who whenever user selects an option
+  function onWhoChanged(whoName) {
+    if (whoName) {
+      localStorage.setItem(STORAGE_KEYS.LAST_WHO, whoName);
+    }
   }
 
   function queryCurrentStock() {
