@@ -1332,7 +1332,7 @@
     editModalInstance.show();
   }
 
-  // 6. Save Edited Row
+  // 6. Save Edited Row (Optimized with instant UI update & non-blocking sync)
   async function saveEditedRow() {
     const actualRow = document.getElementById('editActualRow').value;
     const date = document.getElementById('editDate').value;
@@ -1341,7 +1341,7 @@
     const qty = document.getElementById('editQty').value.trim();
     const loc = document.getElementById('editLoc').value.trim();
     const who = document.getElementById('editWho').value;
-    const note = document.getElementById('editNote').value.trim();
+    const note = document.getElementById('noteInput') ? document.getElementById('editNote').value.trim() : '';
 
     if (!sku || !qty || !who) {
       alert('請填寫完整必要欄位 (料號、數量、人員)！');
@@ -1351,37 +1351,41 @@
     const rowValues = [date, sku, qty, loc, type, who, note];
     const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
 
-    showLoading('正在更新第 ' + actualRow + ' 列記錄...');
+    // Hide edit modal immediately so user isn't stuck
+    editModalInstance.hide();
+    showLoading('正在更新試算表記錄...');
+
     try {
       await apiUpdateValues(range, rowValues);
-      editModalInstance.hide();
-      await loadRecentRecords();
-      alert('記錄修改成功！');
-    } catch (err) {
-      alert('更新失敗: ' + err.message);
-    } finally {
       hideLoading();
+      showToast(`✅ 第 ${actualRow} 列記錄已更新成功！`, 'success');
+      // Silently sync recent records in background
+      setTimeout(loadRecentRecords, 800);
+    } catch (err) {
+      hideLoading();
+      alert('更新失敗: ' + err.message);
     }
   }
 
-  // 7. Delete (Clear) Row
+  // 7. Delete (Clear) Row (Optimized with instant UI update & non-blocking sync)
   async function deleteRowFromEdit() {
     const actualRow = document.getElementById('editActualRow').value;
-    if (!confirm('確定要刪除試算表中第 ' + actualRow + ' 列的記錄嗎？\n(此操作將會清空該行內容)')) {
+    if (!confirm(`確定要刪除試算表中第 ${actualRow} 列的記錄嗎？\n(此操作將會清空該行內容)`)) {
       return;
     }
 
     const range = "'貨架[填單]'!A" + actualRow + ":G" + actualRow;
-    showLoading('正在刪除第 ' + actualRow + ' 列記錄...');
+    editModalInstance.hide();
+    showLoading('正在刪除試算表記錄...');
+
     try {
       await apiClearValues(range);
-      editModalInstance.hide();
-      await loadRecentRecords();
-      alert('記錄已刪除！');
-    } catch (err) {
-      alert('刪除失敗: ' + err.message);
-    } finally {
       hideLoading();
+      showToast(`🗑️ 第 ${actualRow} 列記錄已成功刪除！`, 'success');
+      setTimeout(loadRecentRecords, 800);
+    } catch (err) {
+      hideLoading();
+      alert('刪除失敗: ' + err.message);
     }
   }
 </script>
