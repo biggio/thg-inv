@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>現場庫存快速掃描系統</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- HTML5-QRCode Scanner -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body {
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+    }
+    #reader video {
+      border-radius: 1rem;
+      object-fit: cover;
+      width: 100% !important;
+    }
+    .scan-laser {
+      background: linear-gradient(to bottom, rgba(16, 185, 129, 0), rgba(16, 185, 129, 0.8) 50%, rgba(16, 185, 129, 0));
+      animation: scanLaser 2s infinite ease-in-out;
+    }
+    @keyframes scanLaser {
+      0% { top: 0%; }
+      50% { top: 85%; }
+      100% { top: 0%; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen pb-12">
+
+  <!-- 頂部導航 -->
+  <header class="bg-indigo-600 text-white shadow-md sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <i data-lucide="boxes" class="w-6 h-6 text-indigo-200"></i>
+      <h1 class="font-bold text-lg tracking-wide">貨架庫存掃描</h1>
+    </div>
+    <div class="flex items-center space-x-2">
+      <button id="btnSettings" class="p-1.5 rounded-lg bg-indigo-700/80 hover:bg-indigo-800 active:scale-95 transition" title="API 設定">
+        <i data-lucide="settings" class="w-5 h-5"></i>
+      </button>
+      <button id="btnRefresh" class="p-1.5 rounded-lg bg-indigo-700/80 hover:bg-indigo-800 active:scale-95 transition" title="重新整理">
+        <i data-lucide="rotate-cw" class="w-5 h-5"></i>
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto p-4 space-y-4">
+
+    <!-- API 連線警示 (初次未填 GAS 網址時提示) -->
+    <div id="apiConfigAlert" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-3 text-amber-900 text-xs flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <i data-lucide="alert-circle" class="w-5 h-5 text-amber-600 shrink-0"></i>
+        <span>尚未設定 Apps Script 網址，請先點此綁定</span>
+      </div>
+      <button onclick="openApiModal()" class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded-lg shrink-0">設定</button>
+    </div>
+
+    <!-- 操作模式切換 (進庫 / 出庫) -->
+    <div class="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex gap-2">
+      <button id="modeIn" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm">
+        <i data-lucide="arrow-down-left" class="w-5 h-5"></i>
+        <span>進庫 (入帳)</span>
+      </button>
+      <button id="modeOut" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50">
+        <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
+        <span>出庫 (扣帳)</span>
+      </button>
+    </div>
+
+    <!-- 即時存量提示卡片 -->
+    <div id="stockNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-900 flex items-start space-x-2">
+      <i data-lucide="info" class="w-5 h-5 text-blue-500 shrink-0 mt-0.5"></i>
+      <div id="stockNoticeContent" class="flex-1 leading-relaxed">
+        查詢中...
+      </div>
+    </div>
+
+    <!-- 主要輸入表單 (A~G 欄) -->
+    <form id="stockForm" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3.5">
+
+      <!-- B: 料號 (QR Code 掃描) -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+          料號 (B 欄) <span class="text-rose-500">*</span>
+        </label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="text" id="inputSku" required placeholder="掃描或輸入料號" 
+              class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-base font-mono">
+            <button type="button" id="btnClearSku" class="hidden absolute right-2.5 top-3 text-slate-400 hover:text-slate-600">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <button type="button" id="btnScanSku" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl font-medium flex items-center space-x-1.5 shadow-sm active:scale-95 transition">
+            <i data-lucide="qr-code" class="w-5 h-5"></i>
+            <span class="text-sm font-bold">掃描</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- D: 儲位 (QR Code 掃描) -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+          儲位 (D 欄) <span class="text-rose-500">*</span>
+        </label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="text" id="inputLocation" required placeholder="掃描或輸入儲位 (如: A-01-02)" 
+              class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-base font-mono">
+            <button type="button" id="btnClearLoc" class="hidden absolute right-2.5 top-3 text-slate-400 hover:text-slate-600">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <button type="button" id="btnScanLoc" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl font-medium flex items-center space-x-1.5 shadow-sm active:scale-95 transition">
+            <i data-lucide="map-pin" class="w-5 h-5"></i>
+            <span class="text-sm font-bold">掃位</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- C: 數量 -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+          數量 (C 欄) <span class="text-rose-500">*</span>
+        </label>
+        <div class="flex items-center gap-2">
+          <button type="button" id="btnQtyMinus" class="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center active:scale-95 transition">-</button>
+          <input type="number" id="inputQty" required min="1" step="1" value="1" 
+            class="flex-1 py-2.5 text-center text-xl font-bold bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white">
+          <button type="button" id="btnQtyPlus" class="w-11 h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg flex items-center justify-center active:scale-95 transition">+</button>
+        </div>
+      </div>
+
+      <!-- 更多欄位 (F: 經辦人, G: 備註) -->
+      <div class="pt-2 border-t border-slate-100 space-y-3">
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+              經辦人 (F 欄)
+            </label>
+            <input type="text" id="inputOperator" placeholder="姓名/工號" 
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+              備註 (G 欄)
+            </label>
+            <input type="text" id="inputNote" placeholder="批號/單號/事由" 
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm">
+          </div>
+        </div>
+      </div>
+
+      <!-- 送出按鈕 -->
+      <button type="submit" id="btnSubmit" class="w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition">
+        <i data-lucide="check-circle" class="w-5 h-5"></i>
+        <span id="btnSubmitText">確認進庫送出</span>
+      </button>
+    </form>
+
+    <!-- 最近提交記錄 (A~G 欄回顧) -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-bold text-slate-700 flex items-center space-x-1.5">
+          <i data-lucide="history" class="w-4 h-4 text-slate-500"></i>
+          <span>近期異動記錄 (貨架[填單])</span>
+        </h2>
+        <span class="text-xs text-slate-400" id="recordCount">載入中...</span>
+      </div>
+      <div id="recordList" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+        <div class="text-center py-4 text-slate-400 text-sm">正在載入紀錄...</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 原生相機備援 input (以防極少數舊設備不支援視訊) -->
+  <input type="file" id="fallbackFileInput" accept="image/*" capture="environment" class="hidden">
+
+  <!-- 即時相機掃描全螢幕視窗 (無任何 iframe 阻礙，秒級啟動) -->
+  <div id="scannerModal" class="fixed inset-0 bg-black/95 backdrop-blur-md z-50 hidden flex flex-col justify-between p-4">
+    <div class="flex items-center justify-between text-white pt-2 px-2">
+      <div class="flex items-center space-x-2">
+        <i data-lucide="scan" class="w-6 h-6 text-emerald-400"></i>
+        <span id="scannerTitle" class="font-bold text-base">對準 QR Code 掃描</span>
+      </div>
+      <button id="btnCloseScanner" class="w-9 h-9 rounded-full bg-white/20 text-white flex items-center justify-center active:scale-90 transition">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- 掃描框與動態雷射線 -->
+    <div class="w-full max-w-sm mx-auto my-auto space-y-3">
+      <div class="relative overflow-hidden rounded-2xl bg-black border-2 border-emerald-400 shadow-2xl min-h-[300px] flex items-center justify-center">
+        <div id="reader" class="w-full"></div>
+        <div id="laserLine" class="scan-laser absolute inset-x-0 h-10 pointer-events-none hidden"></div>
+        <div id="cameraLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 text-white p-4 text-center">
+          <div class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+          <p class="text-sm font-medium">正在啟動相機...</p>
+          <p class="text-xs text-slate-400 mt-1">首次開啟請點擊【允許使用相機】</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部控制按鈕 -->
+    <div class="flex items-center justify-center gap-3 pb-4">
+      <button id="btnSwitchCamera" class="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-full flex items-center space-x-2 backdrop-blur-md">
+        <i data-lucide="switch-camera" class="w-4 h-4"></i>
+        <span>切換鏡頭</span>
+      </button>
+      <button id="btnDirectCapture" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-full flex items-center space-x-2 shadow">
+        <i data-lucide="camera" class="w-4 h-4"></i>
+        <span>拍照備援</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- API 設定 Modal -->
+  <div id="apiModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center space-x-2">
+          <i data-lucide="link" class="w-5 h-5 text-indigo-600"></i>
+          <span>Google Apps Script 網址設定</span>
+        </h3>
+        <button onclick="closeApiModal()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 leading-relaxed">
+        請貼上您在 Google 試算表發布的 Apps Script 網頁應用程式網址（以 <code>/exec</code> 結尾）：
+      </p>
+      <textarea id="apiEndpointInput" rows="3" placeholder="https://script.google.com/macros/s/.../exec"
+        class="w-full p-2.5 text-xs font-mono bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500"></textarea>
+      <div class="flex gap-2 justify-end">
+        <button onclick="closeApiModal()" class="px-4 py-2 text-sm text-slate-600 font-medium">取消</button>
+        <button onclick="saveApiEndpoint()" class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow">儲存綁定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 訊息提示 -->
+  <div id="toast" class="fixed bottom-6 inset-x-0 flex justify-center z-50 pointer-events-none transition-all duration-300 opacity-0 translate-y-4">
+    <div id="toastContent" class="bg-slate-900 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2">
+      <i id="toastIcon" data-lucide="info" class="w-4 h-4"></i>
+      <span id="toastMsg">訊息內容</span>
+    </div>
+  </div>
+
+  <script>
+    let currentMode = '進';
+    let currentScanTarget = 'sku';
+    let html5QrCode = null;
+    let cameraList = [];
+    let currentCameraIndex = 0;
+
+    // 取得儲存的 GAS API 網址 (儲存於本機 LocalStorage)
+    let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
+
+    lucide.createIcons();
+
+    // DOM 節點
+    const modeInBtn = document.getElementById('modeIn');
+    const modeOutBtn = document.getElementById('modeOut');
+    const btnSubmit = document.getElementById('btnSubmit');
+    const btnSubmitText = document.getElementById('btnSubmitText');
+    const inputSku = document.getElementById('inputSku');
+    const inputLocation = document.getElementById('inputLocation');
+    const inputQty = document.getElementById('inputQty');
+    const inputOperator = document.getElementById('inputOperator');
+    const inputNote = document.getElementById('inputNote');
+    const btnScanSku = document.getElementById('btnScanSku');
+    const btnScanLoc = document.getElementById('btnScanLoc');
+    const scannerModal = document.getElementById('scannerModal');
+    const btnCloseScanner = document.getElementById('btnCloseScanner');
+    const scannerTitle = document.getElementById('scannerTitle');
+    const btnSwitchCamera = document.getElementById('btnSwitchCamera');
+    const btnDirectCapture = document.getElementById('btnDirectCapture');
+    const fallbackFileInput = document.getElementById('fallbackFileInput');
+    const cameraLoading = document.getElementById('cameraLoading');
+    const laserLine = document.getElementById('laserLine');
+    const stockNotice = document.getElementById('stockNotice');
+    const stockNoticeContent = document.getElementById('stockNoticeContent');
+    const recordList = document.getElementById('recordList');
+    const recordCount = document.getElementById('recordCount');
+    const btnRefresh = document.getElementById('btnRefresh');
+    const apiConfigAlert = document.getElementById('apiConfigAlert');
+    const apiModal = document.getElementById('apiModal');
+    const apiEndpointInput = document.getElementById('apiEndpointInput');
+
+    // 檢查 API 設定
+    if (!API_ENDPOINT) {
+      apiConfigAlert.classList.remove('hidden');
+    }
+
+    function openApiModal() {
+      apiEndpointInput.value = API_ENDPOINT;
+      apiModal.classList.remove('hidden');
+    }
+
+    function closeApiModal() {
+      apiModal.classList.add('hidden');
+    }
+
+    function saveApiEndpoint() {
+      const url = apiEndpointInput.value.trim();
+      if (!url.startsWith('https://script.google.com/')) {
+        alert('請輸入正確的 Google Apps Script 網址 (開頭為 https://script.google.com/)');
+        return;
+      }
+      API_ENDPOINT = url;
+      localStorage.setItem('thg_inv_api_endpoint', url);
+      apiConfigAlert.classList.add('hidden');
+      closeApiModal();
+      showToast('API 綁定成功！', 'success');
+      loadRecentRecords();
+    }
+
+    document.getElementById('btnSettings').addEventListener('click', openApiModal);
+
+    // 記憶操作人員工號/姓名
+    const savedOperator = localStorage.getItem('thg_inv_operator');
+    if (savedOperator) inputOperator.value = savedOperator;
+    inputOperator.addEventListener('change', () => {
+      localStorage.setItem('thg_inv_operator', inputOperator.value.trim());
+    });
+
+    // 模式切換
+    modeInBtn.addEventListener('click', () => setMode('進'));
+    modeOutBtn.addEventListener('click', () => setMode('出'));
+
+    function setMode(mode) {
+      currentMode = mode;
+      if (mode === '進') {
+        modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm";
+        modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
+        btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition";
+        btnSubmitText.textContent = "確認進庫送出";
+      } else {
+        modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-rose-600 text-white shadow-sm";
+        modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
+        btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-rose-600 hover:bg-rose-700 shadow-md active:scale-98 transition";
+        btnSubmitText.textContent = "確認出庫 (扣帳)";
+      }
+      lucide.createIcons();
+    }
+
+    // 數量控制
+    document.getElementById('btnQtyMinus').addEventListener('click', () => {
+      let val = parseInt(inputQty.value) || 1;
+      if (val > 1) inputQty.value = val - 1;
+    });
+    document.getElementById('btnQtyPlus').addEventListener('click', () => {
+      let val = parseInt(inputQty.value) || 0;
+      inputQty.value = val + 1;
+    });
+
+    // 啟動相機掃描
+    btnScanSku.addEventListener('click', () => startScanner('sku', '掃描料號 QR Code'));
+    btnScanLoc.addEventListener('click', () => startScanner('location', '掃描儲位 QR Code'));
+    btnCloseScanner.addEventListener('click', stopScanner);
+
+    async function startScanner(target, title) {
+      currentScanTarget = target;
+      scannerTitle.textContent = title;
+      scannerModal.classList.remove('hidden');
+      cameraLoading.classList.remove('hidden');
+      laserLine.classList.add('hidden');
+
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+      }
+
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          cameraList = devices;
+          let backIdx = devices.findIndex(c => c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('rear') || c.label.toLowerCase().includes('0'));
+          if (backIdx === -1) backIdx = devices.length - 1;
+          currentCameraIndex = backIdx;
+          launchWithId(cameraList[currentCameraIndex].id);
+        } else {
+          launchFacingMode();
+        }
+      } catch (e) {
+        launchFacingMode();
+      }
+    }
+
+    function launchWithId(cameraId) {
+      const config = { fps: 20, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
+      html5QrCode.start(cameraId, config, onScanSuccess)
+        .then(() => {
+          cameraLoading.classList.add('hidden');
+          laserLine.classList.remove('hidden');
+        })
+        .catch(() => launchFacingMode());
+    }
+
+    function launchFacingMode() {
+      const config = { fps: 20, qrbox: { width: 250, height: 250 } };
+      html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+        .then(() => {
+          cameraLoading.classList.add('hidden');
+          laserLine.classList.remove('hidden');
+        })
+        .catch(err => {
+          cameraLoading.classList.add('hidden');
+          showToast('無法啟用視訊串流，請改用拍照掃碼', 'error');
+        });
+    }
+
+    function stopScanner() {
+      if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => {
+          scannerModal.classList.add('hidden');
+        }).catch(() => {
+          scannerModal.classList.add('hidden');
+        });
+      } else {
+        scannerModal.classList.add('hidden');
+      }
+    }
+
+    btnSwitchCamera.addEventListener('click', () => {
+      if (cameraList.length > 1) {
+        currentCameraIndex = (currentCameraIndex + 1) % cameraList.length;
+        if (html5QrCode && html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => {
+            cameraLoading.classList.remove('hidden');
+            laserLine.classList.add('hidden');
+            launchWithId(cameraList[currentCameraIndex].id);
+          });
+        }
+      } else {
+        showToast("未偵測到其他鏡頭", "info");
+      }
+    });
+
+    btnDirectCapture.addEventListener('click', () => fallbackFileInput.click());
+    fallbackFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      showToast("正在解析拍攝照片中的條碼...", "info");
+      if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+
+      html5QrCode.scanFile(file, true)
+        .then(decodedText => onScanSuccess(decodedText))
+        .catch(() => showToast("未能辨識照片中的 QR Code，請確認條碼清晰再試", "error"));
+    });
+
+    // 掃描成功處理
+    function onScanSuccess(decodedText) {
+      if (navigator.vibrate) navigator.vibrate(100);
+      stopScanner();
+
+      const val = decodedText.trim();
+      if (currentScanTarget === 'sku') {
+        inputSku.value = val;
+        showToast(`已讀取料號: ${val}`, "success");
+        fetchStockInfo(val);
+        if (!inputLocation.value) {
+          setTimeout(() => startScanner('location', '請接續掃描「儲位」QR Code'), 600);
+        }
+      } else if (currentScanTarget === 'location') {
+        inputLocation.value = val;
+        showToast(`已讀取儲位: ${val}`, "success");
+        inputQty.focus();
+      }
+    }
+
+    // 查詢特定料號結存
+    inputSku.addEventListener('change', () => {
+      if (inputSku.value.trim()) fetchStockInfo(inputSku.value.trim());
+    });
+
+    async function fetchStockInfo(sku) {
+      if (!API_ENDPOINT) return;
+      stockNotice.classList.remove('hidden');
+      stockNoticeContent.innerHTML = `<span class="animate-pulse">查詢【${sku}】即時結存中...</span>`;
+
+      try {
+        const res = await fetch(`${API_ENDPOINT}?action=queryStock&sku=${encodeURIComponent(sku)}`);
+        const data = await res.json();
+        if (data.success) {
+          const keys = Object.keys(data.stockMap);
+          if (keys.length === 0) {
+            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 目前無任何入庫記錄。`;
+          } else {
+            let details = keys.map(k => `${k}: <b>${data.stockMap[k]}</b>`).join('，');
+            stockNoticeContent.innerHTML = `料號 <b>${data.sku}</b> 總結存: <span class="font-bold text-emerald-600 text-base">${data.total}</span> (分佈: ${details})`;
+          }
+        } else {
+          stockNoticeContent.innerHTML = `無法取得庫存: ${data.error}`;
+        }
+      } catch (err) {
+        stockNoticeContent.innerHTML = `查詢失敗: ${err.message || err}`;
+      }
+    }
+
+    // 表單提交 (寫入試算表)
+    document.getElementById('stockForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      if (!API_ENDPOINT) {
+        openApiModal();
+        return;
+      }
+
+      const sku = inputSku.value.trim();
+      const location = inputLocation.value.trim();
+      const qty = parseInt(inputQty.value) || 0;
+      const operator = inputOperator.value.trim();
+      const note = inputNote.value.trim();
+
+      if (!sku || !location || qty <= 0) {
+        showToast("請完整填寫料號、儲位及數量", "error");
+        return;
+      }
+
+      btnSubmit.disabled = true;
+      btnSubmit.classList.add('opacity-70');
+      btnSubmitText.textContent = "寫入試算表中...";
+
+      const postData = {
+        sku: sku,
+        qty: qty,
+        location: location,
+        type: currentMode,
+        operator: operator,
+        note: note
+      };
+
+      try {
+        // 使用 POST 寫入
+        const res = await fetch(API_ENDPOINT, {
+          method: 'POST',
+          body: JSON.stringify(postData)
+        });
+        const data = await res.json();
+
+        btnSubmit.disabled = false;
+        btnSubmit.classList.remove('opacity-70');
+        btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+
+        if (data.success) {
+          showToast(`成功寫入！${sku} (${currentMode}${qty})`, "success");
+          inputSku.value = "";
+          inputLocation.value = "";
+          inputQty.value = "1";
+          inputNote.value = "";
+          stockNotice.classList.add('hidden');
+          loadRecentRecords();
+        } else {
+          showToast("寫入失敗: " + data.error, "error");
+        }
+      } catch (err) {
+        btnSubmit.disabled = false;
+        btnSubmit.classList.remove('opacity-70');
+        btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+        showToast("傳輸失敗: " + (err.message || err), "error");
+      }
+    });
+
+    // 載入歷史記錄
+    async function loadRecentRecords() {
+      if (!API_ENDPOINT) {
+        recordList.innerHTML = `<div class="text-amber-600 text-xs py-2 text-center">請先點擊右上角設定綁定 Apps Script 網址</div>`;
+        recordCount.textContent = "";
+        return;
+      }
+
+      recordCount.textContent = "載入中...";
+      try {
+        const res = await fetch(`${API_ENDPOINT}?action=getRecords`);
+        const data = await res.json();
+        if (data.success && data.records) {
+          renderRecords(data.records);
+        } else {
+          recordList.innerHTML = `<div class="text-rose-500 text-xs py-2">載入失敗: ${data.error}</div>`;
+          recordCount.textContent = "";
+        }
+      } catch (err) {
+        recordList.innerHTML = `<div class="text-rose-500 text-xs py-2">連線失敗: ${err.message || err}</div>`;
+        recordCount.textContent = "";
+      }
+    }
+
+    function renderRecords(records) {
+      recordCount.textContent = `共 ${records.length} 筆`;
+      if (records.length === 0) {
+        recordList.innerHTML = `<div class="text-slate-400 text-sm py-3 text-center">目前尚無記錄</div>`;
+        return;
+      }
+
+      recordList.innerHTML = records.map(r => {
+        const isOut = r.type === '出' || r.type === '出庫';
+        const badgeColor = isOut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
+        const qtyPrefix = isOut ? '-' : '+';
+        return `
+          <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+            <div class="space-y-0.5">
+              <div class="flex items-center space-x-1.5">
+                <span class="px-1.5 py-0.5 rounded font-bold ${badgeColor}">${r.type}</span>
+                <span class="font-bold text-slate-800 text-sm font-mono">${r.sku}</span>
+              </div>
+              <div class="text-slate-500 flex items-center space-x-2">
+                <span>儲位: <b class="text-slate-700">${r.location}</b></span>
+                <span>經辦: ${r.operator || '-'}</span>
+              </div>
+              <div class="text-slate-400 text-[10px]">${r.date} ${r.note ? `| ${r.note}` : ''}</div>
+            </div>
+            <div class="text-right">
+              <span class="text-base font-bold font-mono ${isOut ? 'text-rose-600' : 'text-emerald-600'}">
+                ${qtyPrefix}${r.qty}
+              </span>
+            </div>
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    btnRefresh.addEventListener('click', loadRecentRecords);
+
+    function showToast(msg, type = "info") {
+      const toast = document.getElementById('toast');
+      const toastContent = document.getElementById('toastContent');
+      const toastMsg = document.getElementById('toastMsg');
+      toastMsg.textContent = msg;
+      if (type === 'error') {
+        toastContent.className = "bg-rose-600 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
+      } else if (type === 'success') {
+        toastContent.className = "bg-emerald-600 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
+      } else {
+        toastContent.className = "bg-slate-900 text-white px-4 py-2.5 rounded-full shadow-lg text-sm flex items-center space-x-2";
+      }
+
+      toast.classList.remove('opacity-0', 'translate-y-4');
+      toast.classList.add('opacity-100', 'translate-y-0');
+
+      setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-4');
+      }, 2500);
+    }
+
+    // 初次載入
+    loadRecentRecords();
+  </script>
+</body>
+</html>
