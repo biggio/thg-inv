@@ -2,29 +2,61 @@
  * Google Apps Script 後端 API (Code.gs)
  * 負責讀取與寫入「貨架[填單]」A~G 欄位
  * 
- * 核心優化：
- * 針對有陣列公式 (ARRAYFORMULA 等) 的試算表，避免 sheet.getLastRow() 誤判空白行，
- * 精確以「A 欄 (日期) 是否有實質資料」為基準判定最後真實行與追加寫入位置。
+ * 業務規則更新：
+ * 1. A 欄日期格式：M/d/yyyy (例如: 9/11/2026)
+ * 2. E 欄格式：進庫為 "1 In"，出庫為 "3 Out"
+ * 3. 支援取得「Active_Item」分頁 B 欄的可用料號清單供前端 Auto-Complete (自動完成)
+ * 4. 精確以 A 欄有無資料判定實際最後一行，徹底避免公式造成的空行跳格
  */
 
 const SHEET_NAME = "貨架[填單]";
+const ACTIVE_ITEM_SHEET_NAME = "Active_Item";
 
-// 輔助函式：精確找出 A 欄最後一個有實質內容的行號 (Row Index)
+// 輔助函式：精確找出 A 欄最後一個有實質內容的行號
 function getActualLastRow(sheet) {
   const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return 1; // 只有表頭或空表
+  if (lastRow <= 1) return 1;
 
-  // 抓取 A 欄全部資料
   const aValues = sheet.getRange(1, 1, lastRow, 1).getValues();
-  
-  // 從最後一行往回找第一個 A 欄不是空的行
   for (let r = aValues.length - 1; r >= 0; r--) {
     const val = aValues[r][0];
     if (val !== "" && val !== null && val !== undefined) {
-      return r + 1; // 轉為 1-indexed 行號
+      return r + 1;
     }
   }
   return 1;
+}
+
+// 取得「Active_Item」分頁 B 欄的所有可用料號
+function getActiveItems() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(ACTIVE_ITEM_SHEET_NAME);
+    if (!sheet) {
+      return { success: true, items: [] };
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, items: [] };
+
+    // 抓取 B 欄（從第 2 行到最後一行）
+    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+    const itemsSet = new Set();
+
+    for (let i = 0; i < bValues.length; i++) {
+      const val = String(bValues[i][0] || '').trim();
+      if (val) {
+        itemsSet.add(val);
+      }
+    }
+
+    return {
+      success: true,
+      items: Array.from(itemsSet)
+    };
+  } catch (err) {
+    return { success: false, error: err.toString(), items: [] };
+  }
 }
 
 // 處理 GET 請求
@@ -39,6 +71,8 @@ function doGet(e) {
       result = getRecentRecords();
     } else if (params.action === 'queryStock') {
       result = queryStock(params.sku);
+    } else if (params.action === 'getActiveItems') {
+      result = getActiveItems();
     } else {
       result = { status: "online", message: "THG 庫存管理 API 運作中", timestamp: new Date() };
     }
@@ -73,7 +107,7 @@ function doPost(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// 取得最近記錄 (以 A 欄有值為準)
+// 取得最近記錄 (最多 20 筆)
 function getRecentRecords() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -88,7 +122,6 @@ function getRecentRecords() {
       return { success: true, records: [] };
     }
     
-    // 只取最後 20 筆真實存在的資料
     const startRow = Math.max(2, actualLastRow - 19);
     const numRows = actualLastRow - startRow + 1;
     const values = sheet.getRange(startRow, 1, numRows, 7).getValues();
@@ -100,7 +133,8 @@ function getRecentRecords() {
       if (dateVal === "" || dateVal === null || dateVal === undefined) continue;
       
       if (dateVal instanceof Date) {
-        dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone() || "GMT+8", "yyyy-MM-dd HH:mm");
+        // 格式化為 M/d/yyyy
+        dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
       }
       records.push({
         id: startRow + i,
@@ -120,7 +154,7 @@ function getRecentRecords() {
   }
 }
 
-// 依料號實時計算各儲位庫存分佈與總結存 (以 A 欄有值為準)
+// 依料號實時計算各儲位庫存分佈與總結存
 function queryStock(sku) {
   try {
     if (!sku) return { success: true, stockMap: {}, total: 0 };
@@ -138,8 +172,7 @@ function queryStock(sku) {
     let total = 0;
     
     values.forEach(row => {
-      // 確保該行不是被公式撐開的空行 (A 欄必須有日期)
-      if (!row[0]) return;
+      if (!row[0]) return; // A 欄有值才算
 
       const rowSku = String(row[1] || '').trim();
       if (rowSku.toLowerCase() === sku.toLowerCase()) {
@@ -147,7 +180,8 @@ function queryStock(sku) {
         const loc = String(row[3] || '未指定儲位').trim();
         const type = String(row[4] || '').trim();
         
-        const delta = (type === '出' || type === '出庫') ? -qty : qty;
+        // 判定進出庫: "3 Out" 或 "出" 為扣帳，"1 In" 或 "進" 為入庫
+        const delta = (type === '3 Out' || type === '出' || type === '出庫') ? -qty : qty;
         stockMap[loc] = (stockMap[loc] || 0) + delta;
         total += delta;
       }
@@ -164,11 +198,11 @@ function queryStock(sku) {
   }
 }
 
-// 寫入一筆庫存紀錄：精準寫在「A 欄最後一筆有資料」的下一行
+// 寫入一筆庫存紀錄
 function submitRecord(data) {
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(10000); // 併發鎖定保護
+    lock.waitLock(10000);
     
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
@@ -177,13 +211,23 @@ function submitRecord(data) {
       sheet.getRange(1, 1, 1, 7).setValues([["日期", "料號", "數量", "儲位", "進或出", "經辦人", "備註"]]);
     }
     
+    // 規則 1：A 欄日期格式應為 9/11/2026 (即 M/d/yyyy)
     const now = new Date();
-    const formattedDate = data.date ? data.date : Utilities.formatDate(now, Session.getScriptTimeZone() || "GMT+8", "yyyy-MM-dd HH:mm:ss");
+    const formattedDate = data.date ? data.date : Utilities.formatDate(now, Session.getScriptTimeZone() || "GMT+8", "M/d/yyyy");
     
     const sku = String(data.sku || '').trim();
     const qty = Number(data.qty) || 0;
     const location = String(data.location || '').trim();
-    const type = String(data.type || '進').trim();
+    
+    // 規則 2：E 欄進庫應為 "1 In"，出庫為 "3 Out"
+    let rawType = String(data.type || '').trim();
+    let typeFormatted = "1 In";
+    if (rawType === '出' || rawType === '3 Out' || rawType === '出庫' || rawType === '3') {
+      typeFormatted = "3 Out";
+    } else {
+      typeFormatted = "1 In";
+    }
+    
     const operator = String(data.operator || '').trim();
     const note = String(data.note || '').trim();
     
@@ -191,17 +235,16 @@ function submitRecord(data) {
     if (qty <= 0) throw new Error("數量必須大於 0");
     if (!location) throw new Error("儲位不能為空");
     
-    // 【核心修復】：不用 appendRow()，而是精確計算 A 欄最後有值的下一行
+    // 以 A 欄最後有值的下一行定點寫入
     const actualLastRow = getActualLastRow(sheet);
     const targetRow = actualLastRow + 1;
     
-    // 將 A~G 寫入該行
     sheet.getRange(targetRow, 1, 1, 7).setValues([[
-      formattedDate, // A: 日期
+      formattedDate, // A: 日期 (M/d/yyyy)
       sku,           // B: 料號
       qty,           // C: 數量
       location,      // D: 儲位
-      type,          // E: 進或出
+      typeFormatted, // E: 進或出 ("1 In" 或 "3 Out")
       operator,      // F: 經辦人
       note           // G: 備註
     ]]);
@@ -215,7 +258,7 @@ function submitRecord(data) {
         sku: sku,
         qty: qty,
         location: location,
-        type: type,
+        type: typeFormatted,
         operator: operator,
         note: note
       }

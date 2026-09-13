@@ -60,15 +60,15 @@
       <button onclick="openApiModal()" class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded-lg shrink-0">設定</button>
     </div>
 
-    <!-- 操作模式切換 (進庫 / 出庫) -->
+    <!-- 操作模式切換 (1 In / 3 Out) -->
     <div class="bg-white p-2 rounded-2xl shadow-sm border border-slate-200 flex gap-2">
       <button id="modeIn" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm">
         <i data-lucide="arrow-down-left" class="w-5 h-5"></i>
-        <span>進庫 (入帳)</span>
+        <span>1 In (進庫)</span>
       </button>
       <button id="modeOut" class="flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50">
         <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
-        <span>出庫 (扣帳)</span>
+        <span>3 Out (出庫)</span>
       </button>
     </div>
 
@@ -81,16 +81,20 @@
     </div>
 
     <!-- 主要輸入表單 (A~G 欄) -->
-    <form id="stockForm" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3.5">
+    <form id="stockForm" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3.5" autocomplete="off">
 
-      <!-- B: 料號 (QR Code 掃描) -->
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-          料號 (B 欄) <span class="text-rose-500">*</span>
-        </label>
+      <!-- B: 料號 (QR Code 掃描 + Active_Item Auto-Complete) -->
+      <div class="relative">
+        <div class="flex items-center justify-between mb-1">
+          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            料號 (B 欄) <span class="text-rose-500">*</span>
+          </label>
+          <span id="skuSourceHint" class="text-[10px] text-slate-400">載入品項清單中...</span>
+        </div>
+        
         <div class="flex gap-2">
           <div class="relative flex-1">
-            <input type="text" id="inputSku" required placeholder="掃描或輸入料號" 
+            <input type="text" id="inputSku" required placeholder="輸入料號 (自動聯想) 或掃描" 
               class="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white text-base font-mono">
             <button type="button" id="btnClearSku" class="hidden absolute right-2.5 top-3 text-slate-400 hover:text-slate-600">
               <i data-lucide="x" class="w-4 h-4"></i>
@@ -100,6 +104,10 @@
             <i data-lucide="qr-code" class="w-5 h-5"></i>
             <span class="text-sm font-bold">掃描</span>
           </button>
+        </div>
+
+        <!-- 料號 Auto-complete 聯想下拉選單 -->
+        <div id="skuSuggestions" class="hidden absolute left-0 right-16 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto divide-y divide-slate-100">
         </div>
       </div>
 
@@ -159,7 +167,7 @@
       <!-- 送出按鈕 -->
       <button type="submit" id="btnSubmit" class="w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition">
         <i data-lucide="check-circle" class="w-5 h-5"></i>
-        <span id="btnSubmitText">確認進庫送出</span>
+        <span id="btnSubmitText">確認 1 In (進庫) 送出</span>
       </button>
     </form>
 
@@ -253,11 +261,12 @@
   </div>
 
   <script>
-    let currentMode = '進';
+    let currentMode = '1 In'; // '1 In' 或 '3 Out'
     let currentScanTarget = 'sku';
     let html5QrCode = null;
     let cameraList = [];
     let currentCameraIndex = 0;
+    let activeItemList = []; // Active_Item 清單
 
     let API_ENDPOINT = localStorage.getItem('thg_inv_api_endpoint') || '';
 
@@ -269,7 +278,11 @@
     const btnSubmit = document.getElementById('btnSubmit');
     const btnSubmitText = document.getElementById('btnSubmitText');
     const inputSku = document.getElementById('inputSku');
+    const btnClearSku = document.getElementById('btnClearSku');
+    const skuSuggestions = document.getElementById('skuSuggestions');
+    const skuSourceHint = document.getElementById('skuSourceHint');
     const inputLocation = document.getElementById('inputLocation');
+    const btnClearLoc = document.getElementById('btnClearLoc');
     const inputQty = document.getElementById('inputQty');
     const inputOperator = document.getElementById('inputOperator');
     const inputNote = document.getElementById('inputNote');
@@ -316,6 +329,7 @@
       apiConfigAlert.classList.add('hidden');
       closeApiModal();
       showToast('API 綁定成功！', 'success');
+      loadActiveItems();
       loadRecentRecords();
     }
 
@@ -327,25 +341,27 @@
       localStorage.setItem('thg_inv_operator', inputOperator.value.trim());
     });
 
-    modeInBtn.addEventListener('click', () => setMode('進'));
-    modeOutBtn.addEventListener('click', () => setMode('出'));
+    // 模式切換 (1 In / 3 Out)
+    modeInBtn.addEventListener('click', () => setMode('1 In'));
+    modeOutBtn.addEventListener('click', () => setMode('3 Out'));
 
     function setMode(mode) {
       currentMode = mode;
-      if (mode === '進') {
+      if (mode === '1 In') {
         modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-emerald-600 text-white shadow-sm";
         modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
         btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 shadow-md active:scale-98 transition";
-        btnSubmitText.textContent = "確認進庫送出";
+        btnSubmitText.textContent = "確認 1 In (進庫) 送出";
       } else {
         modeOutBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition bg-rose-600 text-white shadow-sm";
         modeInBtn.className = "flex-1 py-3 px-4 rounded-xl font-bold flex items-center justify-center space-x-2 transition text-slate-600 hover:bg-slate-50";
         btnSubmit.className = "w-full mt-2 py-3.5 px-4 rounded-xl text-white font-bold text-base flex items-center justify-center space-x-2 bg-rose-600 hover:bg-rose-700 shadow-md active:scale-98 transition";
-        btnSubmitText.textContent = "確認出庫 (扣帳)";
+        btnSubmitText.textContent = "確認 3 Out (出庫扣帳)";
       }
       lucide.createIcons();
     }
 
+    // 數量控制
     document.getElementById('btnQtyMinus').addEventListener('click', () => {
       let val = parseInt(inputQty.value) || 1;
       if (val > 1) inputQty.value = val - 1;
@@ -355,6 +371,89 @@
       inputQty.value = val + 1;
     });
 
+    // 清除按鈕控制
+    inputSku.addEventListener('input', () => {
+      btnClearSku.classList.toggle('hidden', !inputSku.value);
+      handleSkuAutoComplete(inputSku.value);
+    });
+    btnClearSku.addEventListener('click', () => {
+      inputSku.value = '';
+      btnClearSku.classList.add('hidden');
+      skuSuggestions.classList.add('hidden');
+      stockNotice.classList.add('hidden');
+    });
+
+    inputLocation.addEventListener('input', () => {
+      btnClearLoc.classList.toggle('hidden', !inputLocation.value);
+    });
+    btnClearLoc.addEventListener('click', () => {
+      inputLocation.value = '';
+      btnClearLoc.classList.add('hidden');
+    });
+
+    // 載入 Active_Item 料號清單
+    async function loadActiveItems() {
+      if (!API_ENDPOINT) return;
+      try {
+        const res = await fetch(`${API_ENDPOINT}?action=getActiveItems`);
+        const data = await res.json();
+        if (data.success && data.items) {
+          activeItemList = data.items;
+          skuSourceHint.textContent = `已載入 ${activeItemList.length} 種品項`;
+          skuSourceHint.className = "text-[10px] text-emerald-600 font-medium";
+        } else {
+          skuSourceHint.textContent = "未能載入 Active_Item";
+        }
+      } catch (e) {
+        skuSourceHint.textContent = "品項離線模式";
+      }
+    }
+
+    // Auto-complete 聯想過濾
+    function handleSkuAutoComplete(query) {
+      query = query.trim().toLowerCase();
+      if (!query || activeItemList.length === 0) {
+        skuSuggestions.classList.add('hidden');
+        return;
+      }
+
+      const matches = activeItemList
+        .filter(item => item.toLowerCase().includes(query))
+        .slice(0, 15); // 最多顯示 15 個
+
+      if (matches.length === 0) {
+        skuSuggestions.classList.add('hidden');
+        return;
+      }
+
+      skuSuggestions.innerHTML = matches.map(item => `
+        <div class="px-3.5 py-2.5 hover:bg-indigo-50 cursor-pointer text-sm font-mono text-slate-700 flex items-center justify-between" onclick="selectSku('${item.replace(/'/g, "\\'")}')">
+          <span>${item}</span>
+          <i data-lucide="corner-down-left" class="w-3.5 h-3.5 text-slate-400"></i>
+        </div>
+      `).join('');
+      skuSuggestions.classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    window.selectSku = function(sku) {
+      inputSku.value = sku;
+      skuSuggestions.classList.add('hidden');
+      btnClearSku.classList.remove('hidden');
+      fetchStockInfo(sku);
+      if (!inputLocation.value) {
+        inputLocation.focus();
+      }
+    };
+
+    // 點擊空白處關閉 Auto-complete 下拉
+    document.addEventListener('click', (e) => {
+      if (!inputSku.contains(e.target) && !skuSuggestions.contains(e.target)) {
+        skuSuggestions.classList.add('hidden');
+      }
+    });
+
+    // 啟動相機掃描
     btnScanSku.addEventListener('click', () => startScanner('sku', '掃描料號 QR Code'));
     btnScanLoc.addEventListener('click', () => startScanner('location', '掃描儲位 QR Code'));
     btnCloseScanner.addEventListener('click', stopScanner);
@@ -456,6 +555,7 @@
       const val = decodedText.trim();
       if (currentScanTarget === 'sku') {
         inputSku.value = val;
+        btnClearSku.classList.remove('hidden');
         showToast(`已讀取料號: ${val}`, "success");
         fetchStockInfo(val);
         if (!inputLocation.value) {
@@ -463,6 +563,7 @@
         }
       } else if (currentScanTarget === 'location') {
         inputLocation.value = val;
+        btnClearLoc.classList.remove('hidden');
         showToast(`已讀取儲位: ${val}`, "success");
         inputQty.focus();
       }
@@ -496,7 +597,7 @@
       }
     }
 
-    // 表單提交：支援雙軌（POST + GET fallback，徹底避開 CORS 限制）
+    // 表單提交：支援雙軌（POST + GET fallback）
     document.getElementById('stockForm').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -525,25 +626,26 @@
         sku: sku,
         qty: qty,
         location: location,
-        type: currentMode,
+        type: currentMode, // "1 In" 或 "3 Out"
         operator: operator,
         note: note
       };
 
       try {
-        // 使用 URLSearchParams 以 GET 請求發送，完全不受跨來源 CORS 阻擋
         const qs = new URLSearchParams(postData).toString();
         const res = await fetch(`${API_ENDPOINT}?${qs}`);
         const data = await res.json();
 
         btnSubmit.disabled = false;
         btnSubmit.classList.remove('opacity-70');
-        btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+        btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
 
         if (data.success) {
-          showToast(`成功寫入！${sku} (${currentMode}${qty})`, "success");
+          showToast(`成功寫入！${sku} (${currentMode} ${qty})`, "success");
           inputSku.value = "";
+          btnClearSku.classList.add('hidden');
           inputLocation.value = "";
+          btnClearLoc.classList.add('hidden');
           inputQty.value = "1";
           inputNote.value = "";
           stockNotice.classList.add('hidden');
@@ -552,7 +654,6 @@
           showToast("寫入失敗: " + data.error, "error");
         }
       } catch (err) {
-        // 如果瀏覽器仍攔截，使用 form-urlencoded 備援
         try {
           const bodyData = new URLSearchParams(postData);
           await fetch(API_ENDPOINT, {
@@ -561,13 +662,14 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: bodyData.toString()
           });
-          // no-cors 模式下瀏覽器不給讀回應，但 GAS 會確實成功寫入
           btnSubmit.disabled = false;
           btnSubmit.classList.remove('opacity-70');
-          btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
-          showToast(`已送出至試算表！${sku} (${currentMode}${qty})`, "success");
+          btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
+          showToast(`已送出至試算表！${sku} (${currentMode} ${qty})`, "success");
           inputSku.value = "";
+          btnClearSku.classList.add('hidden');
           inputLocation.value = "";
+          btnClearLoc.classList.add('hidden');
           inputQty.value = "1";
           inputNote.value = "";
           stockNotice.classList.add('hidden');
@@ -575,7 +677,7 @@
         } catch (fallbackErr) {
           btnSubmit.disabled = false;
           btnSubmit.classList.remove('opacity-70');
-          btnSubmitText.textContent = currentMode === '進' ? "確認進庫送出" : "確認出庫 (扣帳)";
+          btnSubmitText.textContent = currentMode === '1 In' ? "確認 1 In (進庫) 送出" : "確認 3 Out (出庫扣帳)";
           showToast("連線失敗: " + (fallbackErr.message || fallbackErr), "error");
         }
       }
@@ -613,7 +715,7 @@
       }
 
       recordList.innerHTML = records.map(r => {
-        const isOut = r.type === '出' || r.type === '出庫';
+        const isOut = r.type === '3 Out' || r.type === '出' || r.type === '出庫';
         const badgeColor = isOut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700';
         const qtyPrefix = isOut ? '-' : '+';
         return `
@@ -640,7 +742,10 @@
       lucide.createIcons();
     }
 
-    btnRefresh.addEventListener('click', loadRecentRecords);
+    btnRefresh.addEventListener('click', () => {
+      loadActiveItems();
+      loadRecentRecords();
+    });
 
     function showToast(msg, type = "info") {
       const toast = document.getElementById('toast');
@@ -664,6 +769,8 @@
       }, 2500);
     }
 
+    // 初次載入
+    loadActiveItems();
     loadRecentRecords();
   </script>
 </body>
